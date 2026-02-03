@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <h2>Stage Experiment: WT Protein + Plasmid Validation</h2>
+    <form method="post" enctype="multipart/form-data">
+      <label for="accession">UniProt Accession</label>
+      <input type="text" id="accession" name="accession" required value="{{ accession or '' }}">
+
+      <label for="plasmid_fasta">Plasmid FASTA (paste)</label>
+      <textarea id="plasmid_fasta" name="plasmid_fasta" rows="8">{{ plasmid_fasta or '' }}</textarea>
+
+      <label for="plasmid_file">Or upload FASTA file</label>
+      <input type="file" id="plasmid_file" name="plasmid_file" accept=".fa,.fasta,.txt">
+
+      <label>
+        <input type="checkbox" name="fetch_features" {% if fetch_features %}checked{% endif %}>
+        Fetch UniProt feature table
+      </label>
+
+      <button type="submit">Validate</button>
+    </form>
+  </div>
+
+  {% if result %}
+  <div class="card">
+    <h3>Result</h3>
+    {% if result.error %}
+      <p class="error">{{ result.error }}</p>
+    {% else %}
+      <p class="ok">Validation complete.</p>
+      <h4>Validation</h4>
+      <pre>{{ result.validation | tojson(indent=2) }}</pre>
+      <h4>UniProt Features</h4>
+      <pre>{{ result.features | tojson(indent=2) }}</pre>
+    {% endif %}
+  </div>
+  {% endif %}
+{% endblock %}

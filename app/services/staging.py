@@ -5,6 +5,9 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from typing import Any, Optional
+import hashlib
+import json
+from pathlib import Path
 
 from .sequence_tools import parse_fasta_dna, parse_fasta_protein
 from .plasmid_validation import find_wt_in_plasmid
@@ -13,6 +16,41 @@ from .uniprot_client import (
     fetch_uniprot_fasta,
     fetch_uniprot_features_json,
 )
+
+DEFAULT_VALIDATION_CACHE = Path("instance") / "validation_cache"
+
+
+def _cache_key(accession: str, plasmid_fasta_text: str, fetch_features: bool) -> str:
+    h = hashlib.sha1()
+    h.update(accession.strip().encode("utf-8"))
+    h.update(b"|")
+    h.update(plasmid_fasta_text.encode("utf-8"))
+    h.update(b"|")
+    h.update(b"1" if fetch_features else b"0")
+    return h.hexdigest()
+
+
+def _cache_paths(cache_dir: Path, key: str) -> Path:
+    return cache_dir / f"{key}.json"
+
+
+def _read_validation_cache(cache_dir: Path, key: str) -> Optional[dict[str, Any]]:
+    try:
+        path = _cache_paths(cache_dir, key)
+        if not path.exists():
+            return None
+        return json.loads(path.read_text())
+    except Exception:
+        return None
+
+
+def _write_validation_cache(cache_dir: Path, key: str, data: dict[str, Any]) -> None:
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        path = _cache_paths(cache_dir, key)
+        path.write_text(json.dumps(data))
+    except Exception:
+        return
 
 
 def stage_experiment_validate_plasmid(
@@ -34,6 +72,12 @@ def stage_experiment_validate_plasmid(
         "error": None,
     }
 
+    # Optional cache for repeat demo runs or repeated inputs.
+    cache_key = _cache_key(accession, plasmid_fasta_text, fetch_features)
+    cached = _read_validation_cache(DEFAULT_VALIDATION_CACHE, cache_key)
+    if cached is not None:
+        return cached
+
     try:
         wt_fasta = fetch_uniprot_fasta(accession)
         wt_protein = parse_fasta_protein(wt_fasta)
@@ -50,11 +94,14 @@ def stage_experiment_validate_plasmid(
         call = find_wt_in_plasmid(plasmid_dna, wt_protein)
         result["validation"] = asdict(call)
 
+        _write_validation_cache(DEFAULT_VALIDATION_CACHE, cache_key, result)
         return result
 
     except UniProtError as e:
         result["error"] = f"UniProt error: {e}"
+        _write_validation_cache(DEFAULT_VALIDATION_CACHE, cache_key, result)
         return result
     except Exception as e:
         result["error"] = f"Unexpected error: {e}"
+        _write_validation_cache(DEFAULT_VALIDATION_CACHE, cache_key, result)
         return result

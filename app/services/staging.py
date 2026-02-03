@@ -1,3 +1,6 @@
+"""
+Staging service: fetch UniProt data and validate plasmid encodes WT protein.
+"""
 from __future__ import annotations
 
 from dataclasses import asdict
@@ -55,4 +58,3 @@ def stage_experiment_validate_plasmid(
     except Exception as e:
         result["error"] = f"Unexpected error: {e}"
         return result
-

@@ -1,236 +1,171 @@
 """
-Sequence utilities used by Part C (plasmid validation) and downstream analysis.
+Sequence utility functions used by plasmid validation.
 
-This module deliberately avoids heavy dependencies (e.g., Biopython) to keep the
-coursework environment lightweight and reproducible. It provides:
-- FASTA parsing for DNA and protein sequences
-- DNA reverse complement
-- DNA translation in a specified reading frame
-- 6-frame translation (3 forward + 3 reverse frames)
-
-Key robustness choices:
-- Ambiguous DNA bases translate to 'X' (unknown amino acid) rather than raising.
-  This mirrors real sequencing outputs where ambiguity codes are common and keeps
-  the pipeline resilient.
-- Translation uses a codon table dictionary (default: standard genetic code) so
-  the caller can swap tables via JSON when needed.
-
-Performance:
-- Translation is linear in sequence length (O(n)).
+Includes:
+- FASTA parsing
+- DNA validation
+- Translation utilities
+- Smith–Waterman local alignment
 """
-
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
-from .errors import FastaParseError, InvalidSequenceError
+from app.services.errors import FastaParseError, InvalidSequenceError
 
 
-# Standard genetic code (DNA codons -> amino acids).
-# We keep this as a constant so it's easy to reference and override.
+# =========================
+# FASTA parsing
+# =========================
+
+def _parse_fasta(text: str) -> List[str]:
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if not lines:
+        raise FastaParseError("Empty FASTA input")
+
+    sequences: List[str] = []
+    current: List[str] = []
+
+    for line in lines:
+        if line.startswith(">"):
+            if current:
+                sequences.append("".join(current))
+                current = []
+        else:
+            current.append(line)
+
+    if current:
+        sequences.append("".join(current))
+
+    if not sequences:
+        raise FastaParseError("No sequences found in FASTA")
+
+    return sequences
+
+
+def parse_fasta_dna(text: str) -> str:
+    sequences = _parse_fasta(text)
+    if len(sequences) != 1:
+        raise FastaParseError("Expected exactly one DNA sequence")
+
+    seq = sequences[0].upper()
+    validate_dna(seq)
+    return seq
+
+
+def parse_fasta_protein(text: str) -> str:
+    sequences = _parse_fasta(text)
+    if len(sequences) != 1:
+        raise FastaParseError("Expected exactly one protein sequence")
+
+    return sequences[0].upper()
+
+
+def validate_dna(seq: str) -> None:
+    invalid = set(seq.upper()) - {"A", "C", "G", "T", "N"}
+    if invalid:
+        raise InvalidSequenceError(
+            f"Invalid DNA characters found: {', '.join(sorted(invalid))}"
+        )
+
+
+# =========================
+# Translation
+# =========================
+
 CODON_TABLE: Dict[str, str] = {
     "TTT": "F", "TTC": "F", "TTA": "L", "TTG": "L",
-    "TCT": "S", "TCC": "S", "TCA": "S", "TCG": "S",
-    "TAT": "Y", "TAC": "Y", "TAA": "*", "TAG": "*",
-    "TGT": "C", "TGC": "C", "TGA": "*", "TGG": "W",
     "CTT": "L", "CTC": "L", "CTA": "L", "CTG": "L",
-    "CCT": "P", "CCC": "P", "CCA": "P", "CCG": "P",
-    "CAT": "H", "CAC": "H", "CAA": "Q", "CAG": "Q",
-    "CGT": "R", "CGC": "R", "CGA": "R", "CGG": "R",
     "ATT": "I", "ATC": "I", "ATA": "I", "ATG": "M",
-    "ACT": "T", "ACC": "T", "ACA": "T", "ACG": "T",
-    "AAT": "N", "AAC": "N", "AAA": "K", "AAG": "K",
-    "AGT": "S", "AGC": "S", "AGA": "R", "AGG": "R",
     "GTT": "V", "GTC": "V", "GTA": "V", "GTG": "V",
+    "TCT": "S", "TCC": "S", "TCA": "S", "TCG": "S",
+    "CCT": "P", "CCC": "P", "CCA": "P", "CCG": "P",
+    "ACT": "T", "ACC": "T", "ACA": "T", "ACG": "T",
     "GCT": "A", "GCC": "A", "GCA": "A", "GCG": "A",
+    "TAT": "Y", "TAC": "Y", "TAA": "*", "TAG": "*",
+    "CAT": "H", "CAC": "H", "CAA": "Q", "CAG": "Q",
+    "AAT": "N", "AAC": "N", "AAA": "K", "AAG": "K",
     "GAT": "D", "GAC": "D", "GAA": "E", "GAG": "E",
+    "TGT": "C", "TGC": "C", "TGA": "*", "TGG": "W",
+    "CGT": "R", "CGC": "R", "CGA": "R", "CGG": "R",
+    "AGT": "S", "AGC": "S", "AGA": "R", "AGG": "R",
     "GGT": "G", "GGC": "G", "GGA": "G", "GGG": "G",
 }
 
-# IUPAC DNA alphabet (includes ambiguous bases).
-# We allow these because real sequencing/assembly often contains N/R/Y/etc.
-IUPAC_DNA = set("ACGTRYSWKMBDHVN")
 
-# Protein alphabet:
-# - Standard 20 amino acids (A,C,D,E,F,G,H,I,K,L,M,N,P,Q,R,S,T,V,W,Y)
-# - X = unknown/ambiguous AA
-# - * = stop
-# - U/O/B/Z/J appear in some resources; we accept them as "valid" characters.
-PROTEIN_ALPHABET = set("ACDEFGHIKLMNPQRSTVWYXBZJUO*")
-
-
-@dataclass(frozen=True)
-class FastaRecord:
-    header: str
-    seq: str
-
-
-def _read_fasta_records(text: str) -> List[FastaRecord]:
-    """
-    Parse FASTA text into records.
-
-    Accepts:
-    - Standard FASTA with one or multiple records.
-    - "Raw sequence" with no header (treated as a single record).
-
-    Raises:
-    - FastaParseError if formatting is malformed.
-    """
-    if text is None:
-        raise FastaParseError("FASTA input was None")
-
-    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-    if not lines:
-        raise FastaParseError("FASTA input is empty")
-
-    # If there are no headers at all, treat the whole thing as a raw sequence.
-    if not any(ln.startswith(">") for ln in lines):
-        return [FastaRecord(header="raw_sequence", seq="".join(lines))]
-
-    records: List[FastaRecord] = []
-    header = None
-    seq_parts: List[str] = []
-
-    for ln in lines:
-        if ln.startswith(">"):
-            # Commit previous record (if any)
-            if header is not None:
-                records.append(FastaRecord(header=header, seq="".join(seq_parts)))
-            header = ln[1:].strip() or "unnamed_record"
-            seq_parts = []
-        else:
-            if header is None:
-                # Sequence before any header is not valid FASTA.
-                raise FastaParseError("FASTA sequence line encountered before any header ('>')")
-            seq_parts.append(ln)
-
-    # Commit last record
-    if header is not None:
-        records.append(FastaRecord(header=header, seq="".join(seq_parts)))
-
-    if not records:
-        raise FastaParseError("No FASTA records found")
-
-    return records
-
-
-def parse_fasta_dna(text: str, *, allow_multiple: bool = False) -> str:
-    """
-    Parse a DNA FASTA into a single uppercase sequence.
-
-    Why we default to *single-record only*:
-    - The plasmid upload should represent one construct.
-    - Multi-record input (e.g., several plasmids) should be rejected with a clear message
-      instead of quietly choosing one.
-
-    Set allow_multiple=True if you deliberately want "first record wins".
-    """
-    records = _read_fasta_records(text)
-
-    if len(records) > 1 and not allow_multiple:
-        raise FastaParseError(
-            f"DNA FASTA contains {len(records)} records (expected 1). "
-            "Please upload a single plasmid sequence."
-        )
-
-    seq = records[0].seq.upper().replace(" ", "")
-    if not seq:
-        raise InvalidSequenceError("DNA sequence is empty after parsing FASTA")
-
-    # Validate IUPAC alphabet; this prevents subtle downstream bugs.
-    bad = {c for c in seq if c not in IUPAC_DNA}
-    if bad:
-        sample = "".join(sorted(list(bad)))[:20]
-        raise InvalidSequenceError(f"DNA sequence contains invalid characters: {sample}")
-
-    return seq
-
-
-def parse_fasta_protein(text: str, *, allow_multiple: bool = False) -> str:
-    """
-    Parse a protein FASTA into a single uppercase sequence.
-
-    Why validation matters:
-    - UniProt sequences should be clean, but user-supplied FASTA may contain unusual characters.
-    - Failing early avoids confusing downstream 'no match' errors caused by bad input.
-    """
-    records = _read_fasta_records(text)
-
-    if len(records) > 1 and not allow_multiple:
-        raise FastaParseError(
-            f"Protein FASTA contains {len(records)} records (expected 1). "
-            "Please upload a single WT protein sequence."
-        )
-
-    seq = records[0].seq.upper().replace(" ", "")
-    if not seq:
-        raise InvalidSequenceError("Protein sequence is empty after parsing FASTA")
-
-    bad = {c for c in seq if c not in PROTEIN_ALPHABET}
-    if bad:
-        sample = "".join(sorted(list(bad)))[:20]
-        raise InvalidSequenceError(f"Protein sequence contains invalid characters: {sample}")
-
-    return seq
-
-
-def reverse_complement(dna: str) -> str:
-    """Reverse-complement a DNA sequence (IUPAC-safe for common ambiguity letters)."""
-    comp = {
-        "A": "T", "C": "G", "G": "C", "T": "A",
-        "R": "Y", "Y": "R", "S": "S", "W": "W",
-        "K": "M", "M": "K", "B": "V", "V": "B",
-        "D": "H", "H": "D", "N": "N",
-    }
-    return "".join(comp.get(b, "N") for b in reversed(dna.upper()))
-
-
-def translate_dna(dna: str, *, frame: int = 0, codon_table: Dict[str, str] = CODON_TABLE) -> str:
-    """
-    Translate DNA -> protein for a given frame.
-
-    Notes:
-    - We translate every complete codon and keep '*' in the output.
-    - Any codon containing ambiguous bases returns 'X' rather than failing.
-      This matches real-world sequencing ambiguity and keeps the pipeline robust.
-    """
-    dna = dna.upper()
-    # Defensive programming: callers may pass codon_table=None.
-    # Default back to the standard genetic code to avoid crashes.
-    if codon_table is None:
-        codon_table = CODON_TABLE
-    aa = []
-    for i in range(frame, len(dna) - 2, 3):
-        codon = dna[i:i + 3]
-        if any(c not in "ACGT" for c in codon):
-            aa.append("X")
-        else:
-            aa.append(codon_table.get(codon, "X"))
+def translate_dna(seq: str, codon_table: Dict[str, str]) -> str:
+    aa: List[str] = []
+    for i in range(0, len(seq) - 2, 3):
+        codon = seq[i : i + 3]
+        aa.append(codon_table.get(codon, "X"))
     return "".join(aa)
 
-    # Defensive programming: allow callers to omit codon table.
+
+def reverse_complement(seq: str) -> str:
+    complement = {"A": "T", "T": "A", "C": "G", "G": "C", "N": "N"}
+    return "".join(complement.get(b, "N") for b in reversed(seq))
+
+
+def translate_six_frames(
+    seq: str,
+    *,
+    codon_table: Dict[str, str] | None = None,
+) -> Dict[str, str]:
     if codon_table is None:
         codon_table = CODON_TABLE
-def translate_six_frames(dna: str, *, codon_table: Dict[str, str] = CODON_TABLE) -> Dict[str, str]:
-    """
-    Translate a DNA sequence in all 6 reading frames (+0/+1/+2 and -0/-1/-2).
 
-    Why this matters scientifically:
-    - Plasmids can encode the gene on either strand.
-    - The reading frame is not guaranteed unless annotated.
+    frames: Dict[str, str] = {}
 
-    The validator searches across these 6 translations to find the WT protein.
-    """
-    dna = dna.upper()
-    rc = reverse_complement(dna)
+    for frame in range(3):
+        frames[f"+{frame}"] = translate_dna(seq[frame:], codon_table)
 
-    return {
-        "+0": translate_dna(dna, frame=0, codon_table=codon_table),
-        "+1": translate_dna(dna, frame=1, codon_table=codon_table),
-        "+2": translate_dna(dna, frame=2, codon_table=codon_table),
-        "-0": translate_dna(rc, frame=0, codon_table=codon_table),
-        "-1": translate_dna(rc, frame=1, codon_table=codon_table),
-        "-2": translate_dna(rc, frame=2, codon_table=codon_table),
-    }
+    rev = reverse_complement(seq)
+    for frame in range(3):
+        frames[f"-{frame}"] = translate_dna(rev[frame:], codon_table)
+
+    return frames
+
+
+# =========================
+# Smith–Waterman alignment
+# =========================
+
+@dataclass
+class AlignmentResult:
+    score: int
+    end_i: int
+    end_j: int
+
+
+def smith_waterman_local(
+    a: str,
+    b: str,
+    *,
+    match: int = 2,
+    mismatch: int = -1,
+    gap: int = -1,
+    max_cells: int = 2_000_000,
+) -> AlignmentResult | None:
+    n, m = len(a), len(b)
+    if n * m > max_cells:
+        return None
+
+    H = [[0] * (m + 1) for _ in range(n + 1)]
+
+    best = AlignmentResult(0, 0, 0)
+
+    for i in range(1, n + 1):
+        for j in range(1, m + 1):
+            score = max(
+                0,
+                H[i - 1][j - 1] + (match if a[i - 1] == b[j - 1] else mismatch),
+                H[i - 1][j] + gap,
+                H[i][j - 1] + gap,
+            )
+            H[i][j] = score
+            if score > best.score:
+                best = AlignmentResult(score, i, j)
+
+    return best

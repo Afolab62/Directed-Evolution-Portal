@@ -1,11 +1,15 @@
 """
 Staging routes: UniProt accession + plasmid FASTA upload + validation.
 """
+from pathlib import Path
+import logging
+
 from flask import Blueprint, jsonify, render_template, request
 
 from app.services.staging import stage_experiment_validate_plasmid
 
 staging_bp = Blueprint("staging", __name__, url_prefix="/staging")
+logger = logging.getLogger(__name__)
 
 
 def _get_plasmid_fasta_from_request() -> str:
@@ -48,6 +52,13 @@ def staging_submit():
         fetch_features=fetch_features,
     )
 
+    logger.info(
+        "staging_submit accession=%s valid=%s match_type=%s",
+        accession,
+        (result.get("validation") or {}).get("is_valid"),
+        (result.get("validation") or {}).get("match_type"),
+    )
+
     return render_template(
         "staging.html",
         result=result,
@@ -76,4 +87,19 @@ def staging_api():
         plasmid_fasta_text=plasmid_fasta,
         fetch_features=fetch_features,
     )
+    logger.info(
+        "staging_api accession=%s valid=%s match_type=%s",
+        accession,
+        (result.get("validation") or {}).get("is_valid"),
+        (result.get("validation") or {}).get("match_type"),
+    )
     return jsonify(result), 200
+
+
+@staging_bp.get("/example")
+def staging_example():
+    """Return example plasmid FASTA text for quick demos."""
+    example_path = Path("data") / "pET-28a_BSU_DNA_Pol_I_WT.fa"
+    if not example_path.exists():
+        return jsonify({"error": "Example FASTA not found"}), 404
+    return jsonify({"fasta": example_path.read_text(encoding="utf-8")}), 200

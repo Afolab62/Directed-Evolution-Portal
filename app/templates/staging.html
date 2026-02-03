@@ -3,12 +3,21 @@
   <div class="card">
     <h2>Stage Experiment: WT Protein + Plasmid Validation</h2>
     <p class="muted">Note: validation will fail if the plasmid does not encode the selected UniProt WT protein.</p>
+    <details class="muted" style="margin-top: 8px;">
+      <summary>How validation works</summary>
+      <div style="margin-top: 6px;">
+        We translate the circular plasmid in all six frames, then search for the WT protein using
+        exact matching, fuzzy identity fallback, and a final local alignment step for indels.
+      </div>
+    </details>
     <form method="post" enctype="multipart/form-data">
       <label for="accession">UniProt Accession</label>
       <input type="text" id="accession" name="accession" required value="{{ accession or '' }}">
 
       <label for="plasmid_fasta">Plasmid FASTA (paste)</label>
       <textarea id="plasmid_fasta" name="plasmid_fasta" rows="8">{{ plasmid_fasta or '' }}</textarea>
+
+      <button type="button" id="load-example">Load Example FASTA</button>
 
       <label for="plasmid_file">Or upload FASTA file</label>
       <input type="file" id="plasmid_file" name="plasmid_file" accept=".fa,.fasta,.txt">
@@ -26,8 +35,10 @@
   <div class="card">
     <h3>Result</h3>
     {% if result.error %}
+      <span class="badge err">Not valid</span>
       <p class="error">{{ result.error }}</p>
     {% else %}
+      <span class="badge ok">Valid</span>
       <p class="ok">Validation complete.</p>
       <h4>Validation</h4>
       <pre>{{ result.validation | tojson(indent=2) }}</pre>
@@ -36,4 +47,18 @@
     {% endif %}
   </div>
   {% endif %}
+
+  <script>
+    document.getElementById("load-example")?.addEventListener("click", async () => {
+      try {
+        const resp = await fetch("/staging/example");
+        const data = await resp.json();
+        if (data.fasta) {
+          document.getElementById("plasmid_fasta").value = data.fasta;
+        }
+      } catch (e) {
+        // no-op: example is optional
+      }
+    });
+  </script>
 {% endblock %}

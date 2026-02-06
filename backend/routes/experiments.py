@@ -6,13 +6,7 @@ experiments_bp = Blueprint('experiments', __name__, url_prefix='/api/experiments
 
 def require_auth():
     """Check if user is authenticated"""
-    # Debug logging
-    print(f"Session contents: {dict(session)}")
-    print(f"Session keys: {list(session.keys())}")
-    
     user_id = session.get('user_id')
-    print(f"User ID from session: {user_id}")
-    
     if not user_id:
         return None
     return user_id

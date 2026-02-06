@@ -1,117 +1,128 @@
-"use client"
+"use client";
 
-import React from "react"
+import React from "react";
 
-import { useEffect, useState } from 'react'
-import Link from 'next/link'
-import { useRouter, useParams } from 'next/navigation'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { toast } from '@/hooks/use-toast'
-import { 
-  ArrowLeft, 
-  Upload, 
-  FileText, 
-  CheckCircle2, 
-  XCircle, 
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { useRouter, useParams } from "next/navigation";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { toast } from "@/hooks/use-toast";
+import {
+  ArrowLeft,
+  Upload,
+  FileText,
+  CheckCircle2,
+  XCircle,
   Loader2,
   BarChart3,
   Dna,
-  AlertTriangle
-} from 'lucide-react'
-import type { Experiment, VariantData } from '@/lib/types'
-import { use } from 'react' // Import the use hook
+  AlertTriangle,
+} from "lucide-react";
+import type { Experiment, VariantData } from "@/lib/types";
+import { use } from "react"; // Import the use hook
 
 export default function ExperimentDetailPage() {
-  const params = useParams()
-  const id = params.id as string
-  const router = useRouter()
-  
-  const [experiment, setExperiment] = useState<Experiment | null>(null)
-  const [variants, setVariants] = useState<VariantData[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [isUploading, setIsUploading] = useState(false)
+  const params = useParams();
+  const id = params.id as string;
+  const router = useRouter();
+
+  const [experiment, setExperiment] = useState<Experiment | null>(null);
+  const [variants, setVariants] = useState<VariantData[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isUploading, setIsUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState<{
-    parsed: number
-    processed: number
-    passedQC: number
-    failedQC: number
-    errors: Array<{row: number, field: string, message: string}>
-    warnings: string[]
-  } | null>(null)
+    parsed: number;
+    processed: number;
+    passedQC: number;
+    failedQC: number;
+    errors: Array<{ row: number; field: string; message: string }>;
+    warnings: string[];
+  } | null>(null);
 
   useEffect(() => {
-    loadExperiment()
-  }, [id])
+    loadExperiment();
+  }, [id]);
 
   const loadExperiment = async () => {
     try {
-      const res = await fetch(`/api/experiments/${id}`)
-      const data = await res.json()
-      
+      const res = await fetch(`/api/experiments/${id}`);
+      const data = await res.json();
+
       if (data.success) {
-        setExperiment(data.experiment)
-        setVariants(data.variants || [])
+        setExperiment(data.experiment);
+        setVariants(data.variants || []);
       } else {
-        toast({ title: 'Experiment not found', variant: 'destructive' })
-        router.push('/dashboard/experiments')
+        toast({ title: "Experiment not found", variant: "destructive" });
+        router.push("/dashboard/experiments");
       }
     } catch {
-      toast({ title: 'Failed to load experiment', variant: 'destructive' })
+      toast({ title: "Failed to load experiment", variant: "destructive" });
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
-  }
+  };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-    setIsUploading(true)
-    setUploadResult(null)
+    setIsUploading(true);
+    setUploadResult(null);
 
     try {
-      const content = await file.text()
-      const format = file.name.endsWith('.json') ? 'json' : 'tsv'
+      const content = await file.text();
+      const format = file.name.endsWith(".json") ? "json" : "tsv";
 
       const res = await fetch(`/api/experiments/${id}/parse`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ data: content, format }),
-      })
+      });
 
-      const result = await res.json()
+      const result = await res.json();
 
       if (result.success) {
-        setUploadResult(result)
-        toast({ title: `Parsed ${result.processed} variants successfully` })
-        loadExperiment()
+        setUploadResult(result);
+        toast({ title: `Parsed ${result.processed} variants successfully` });
+        loadExperiment();
       } else {
-        toast({ title: result.error || 'Failed to parse data', variant: 'destructive' })
+        toast({
+          title: result.error || "Failed to parse data",
+          variant: "destructive",
+        });
       }
     } catch {
-      toast({ title: 'Failed to upload file', variant: 'destructive' })
+      toast({ title: "Failed to upload file", variant: "destructive" });
     } finally {
-      setIsUploading(false)
+      setIsUploading(false);
     }
-  }
+  };
 
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
       </div>
-    )
+    );
   }
 
   if (!experiment) {
-    return null
+    return null;
   }
 
-  const passedVariants = variants.filter(v => v.qcStatus === 'passed')
-  const generations = [...new Set(variants.map(v => v.generation))].sort((a, b) => a - b)
+  const passedVariants = variants.filter((v) => v.qcStatus === "passed");
+  const generations = [...new Set(variants.map((v) => v.generation))].sort(
+    (a, b) => a - b,
+  );
 
   return (
     <div className="space-y-6">
@@ -122,18 +133,21 @@ export default function ExperimentDetailPage() {
           </Link>
         </Button>
         <div className="flex-1">
-          <h1 className="text-2xl font-bold text-foreground">{experiment.name}</h1>
+          <h1 className="text-2xl font-bold text-foreground">
+            {experiment.name}
+          </h1>
           <p className="text-muted-foreground">
-            {experiment.proteinName || experiment.proteinAccession} ({experiment.proteinAccession})
+            {experiment.proteinName || experiment.proteinAccession} (
+            {experiment.proteinAccession})
           </p>
         </div>
         <Badge
           variant={
-            experiment.validationStatus === 'valid'
-              ? 'default'
-              : experiment.validationStatus === 'invalid'
-              ? 'destructive'
-              : 'secondary'
+            experiment.validationStatus === "valid"
+              ? "default"
+              : experiment.validationStatus === "invalid"
+                ? "destructive"
+                : "secondary"
           }
         >
           {experiment.validationStatus}
@@ -145,7 +159,9 @@ export default function ExperimentDetailPage() {
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="upload">Upload Data</TabsTrigger>
           {variants.length > 0 && (
-            <TabsTrigger value="variants">Variants ({variants.length})</TabsTrigger>
+            <TabsTrigger value="variants">
+              Variants ({variants.length})
+            </TabsTrigger>
           )}
         </TabsList>
 
@@ -162,19 +178,25 @@ export default function ExperimentDetailPage() {
               <CardContent className="space-y-3">
                 <div>
                   <p className="text-sm text-muted-foreground">Name</p>
-                  <p className="font-medium">{experiment.proteinName || 'Unknown'}</p>
+                  <p className="font-medium">
+                    {experiment.proteinName || "Unknown"}
+                  </p>
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground">Organism</p>
-                  <p className="font-medium">{(experiment.proteinFeatures as any)?.organism || 'Unknown'}</p>
+                  <p className="font-medium">
+                    {(experiment.proteinFeatures as any)?.organism || "Unknown"}
+                  </p>
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground">Length</p>
-                  <p className="font-mono">{experiment.wtProteinSequence?.length || 0} aa</p>
+                  <p className="font-mono">
+                    {experiment.wtProteinSequence?.length || 0} aa
+                  </p>
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground">Accession</p>
-                  <a 
+                  <a
                     href={`https://www.uniprot.org/uniprotkb/${experiment.proteinAccession}`}
                     target="_blank"
                     rel="noopener noreferrer"
@@ -201,18 +223,20 @@ export default function ExperimentDetailPage() {
                 <div>
                   <p className="text-sm text-muted-foreground">Length</p>
                   <p className="font-mono">
-                    {experiment.plasmidSequence
-                      .split('\n')
-                      .filter(line => !line.startsWith('>'))
-                      .join('')
-                      .replace(/\s/g, '')
-                      .length} bp
+                    {
+                      experiment.plasmidSequence
+                        .split("\n")
+                        .filter((line) => !line.startsWith(">"))
+                        .join("")
+                        .replace(/\s/g, "").length
+                    }{" "}
+                    bp
                   </p>
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground">Validation</p>
                   <div className="flex items-center gap-2 mt-1">
-                    {experiment.validationStatus === 'valid' ? (
+                    {experiment.validationStatus === "valid" ? (
                       <CheckCircle2 className="h-4 w-4 text-accent" />
                     ) : (
                       <XCircle className="h-4 w-4 text-destructive" />
@@ -229,14 +253,18 @@ export default function ExperimentDetailPage() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <Card>
                 <CardContent className="pt-6">
-                  <p className="text-sm text-muted-foreground">Total Variants</p>
+                  <p className="text-sm text-muted-foreground">
+                    Total Variants
+                  </p>
                   <p className="text-2xl font-bold">{variants.length}</p>
                 </CardContent>
               </Card>
               <Card>
                 <CardContent className="pt-6">
                   <p className="text-sm text-muted-foreground">Passed QC</p>
-                  <p className="text-2xl font-bold text-accent">{passedVariants.length}</p>
+                  <p className="text-2xl font-bold text-accent">
+                    {passedVariants.length}
+                  </p>
                 </CardContent>
               </Card>
               <Card>
@@ -247,9 +275,13 @@ export default function ExperimentDetailPage() {
               </Card>
               <Card>
                 <CardContent className="pt-6">
-                  <p className="text-sm text-muted-foreground">Highest Activity</p>
+                  <p className="text-sm text-muted-foreground">
+                    Highest Activity
+                  </p>
                   <p className="text-2xl font-bold">
-                    {Math.max(...variants.map(v => v.activityScore)).toFixed(2)}
+                    {Math.max(...variants.map((v) => v.activityScore)).toFixed(
+                      2,
+                    )}
                   </p>
                 </CardContent>
               </Card>
@@ -298,10 +330,13 @@ export default function ExperimentDetailPage() {
                     <Upload className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
                   )}
                   <p className="text-sm text-muted-foreground">
-                    {isUploading ? 'Processing...' : 'Click to upload TSV or JSON file'}
+                    {isUploading
+                      ? "Processing..."
+                      : "Click to upload TSV or JSON file"}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    Required fields: Plasmid_Variant_Index, Assembled_DNA_Sequence, DNA_Yield, Protein_Yield
+                    Required fields: Plasmid_Variant_Index,
+                    Assembled_DNA_Sequence, DNA_Yield, Protein_Yield
                   </p>
                 </label>
               </div>
@@ -319,16 +354,22 @@ export default function ExperimentDetailPage() {
                         <p className="font-medium">{uploadResult.parsed}</p>
                       </div>
                       <div>
-                        <p className="text-muted-foreground">Variants Processed</p>
+                        <p className="text-muted-foreground">
+                          Variants Processed
+                        </p>
                         <p className="font-medium">{uploadResult.processed}</p>
                       </div>
                       <div>
                         <p className="text-muted-foreground">Passed QC</p>
-                        <p className="font-medium text-accent">{uploadResult.passedQC}</p>
+                        <p className="font-medium text-accent">
+                          {uploadResult.passedQC}
+                        </p>
                       </div>
                       <div>
                         <p className="text-muted-foreground">Failed QC</p>
-                        <p className="font-medium text-destructive">{uploadResult.failedQC}</p>
+                        <p className="font-medium text-destructive">
+                          {uploadResult.failedQC}
+                        </p>
                       </div>
                     </div>
                   </div>
@@ -362,7 +403,9 @@ export default function ExperimentDetailPage() {
                           </li>
                         ))}
                         {uploadResult.errors.length > 10 && (
-                          <li>... and {uploadResult.errors.length - 10} more</li>
+                          <li>
+                            ... and {uploadResult.errors.length - 10} more
+                          </li>
                         )}
                       </ul>
                     </div>
@@ -402,14 +445,28 @@ export default function ExperimentDetailPage() {
                         .slice(0, 50)
                         .map((v) => (
                           <tr key={v.id} className="border-b">
-                            <td className="py-2 px-2 font-mono">{v.plasmidVariantIndex}</td>
+                            <td className="py-2 px-2 font-mono">
+                              {v.plasmidVariantIndex}
+                            </td>
                             <td className="py-2 px-2">{v.generation}</td>
-                            <td className="py-2 px-2">{v.dnaYield.toFixed(2)}</td>
-                            <td className="py-2 px-2">{v.proteinYield.toFixed(2)}</td>
-                            <td className="py-2 px-2 font-medium">{v.activityScore.toFixed(3)}</td>
+                            <td className="py-2 px-2">
+                              {v.dnaYield.toFixed(2)}
+                            </td>
+                            <td className="py-2 px-2">
+                              {v.proteinYield.toFixed(2)}
+                            </td>
+                            <td className="py-2 px-2 font-medium">
+                              {v.activityScore.toFixed(3)}
+                            </td>
                             <td className="py-2 px-2">{v.mutations.length}</td>
                             <td className="py-2 px-2">
-                              <Badge variant={v.qcStatus === 'passed' ? 'default' : 'destructive'}>
+                              <Badge
+                                variant={
+                                  v.qcStatus === "passed"
+                                    ? "default"
+                                    : "destructive"
+                                }
+                              >
                                 {v.qcStatus}
                               </Badge>
                             </td>
@@ -424,5 +481,5 @@ export default function ExperimentDetailPage() {
         )}
       </Tabs>
     </div>
-  )
+  );
 }

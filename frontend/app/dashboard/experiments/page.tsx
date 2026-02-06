@@ -21,6 +21,16 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { FlaskConical, Plus, ChevronRight, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import type { Experiment } from "@/lib/types";
@@ -30,6 +40,11 @@ export default function ExperimentsPage() {
   const router = useRouter();
   const [experiments, setExperiments] = useState<Experiment[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [experimentToDelete, setExperimentToDelete] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
 
   const loadExperiments = async () => {
     if (!user) return;
@@ -52,10 +67,17 @@ export default function ExperimentsPage() {
   }, [user]);
 
   const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`Are you sure you want to delete "${name}"?`)) return;
+    setExperimentToDelete({ id, name });
+    setDeleteDialogOpen(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!experimentToDelete) return;
 
     try {
-      const res = await fetch(`/api/experiments/${id}`, { method: "DELETE" });
+      const res = await fetch(`/api/experiments/${experimentToDelete.id}`, {
+        method: "DELETE",
+      });
       const data = await res.json();
 
       if (data.success) {
@@ -66,6 +88,9 @@ export default function ExperimentsPage() {
       }
     } catch {
       toast.error("Failed to delete experiment");
+    } finally {
+      setDeleteDialogOpen(false);
+      setExperimentToDelete(null);
     }
   };
 
@@ -180,6 +205,27 @@ export default function ExperimentsPage() {
           )}
         </CardContent>
       </Card>
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Experiment</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete &quot;{experimentToDelete?.name}
+              &quot;? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

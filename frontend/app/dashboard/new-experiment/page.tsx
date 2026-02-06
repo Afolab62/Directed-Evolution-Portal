@@ -55,7 +55,9 @@ export default function NewExperimentPage() {
     setProtein(null)
 
     try {
-      const res = await fetch(`/api/uniprot/${accession.trim()}`)
+      const res = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'}/api/uniprot/${accession.trim()}`, {
+        credentials: 'include'
+      })
       const data = await res.json()
 
       if (data.success) {
@@ -99,9 +101,10 @@ export default function NewExperimentPage() {
     setValidationResult(null)
 
     try {
-      const res = await fetch('/api/experiments', {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'}/api/experiments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           userId: user?.id,
           name: experimentName || `${protein?.name} Experiment`,

@@ -4,6 +4,7 @@ from flask_session import Session
 from config import Config
 from routes.auth import auth_bp
 from routes.experiments import experiments_bp
+from routes.uniprot import uniprot_bp
 from database import init_db
 
 
@@ -23,6 +24,7 @@ def create_app():
     # Register blueprints
     app.register_blueprint(auth_bp)
     app.register_blueprint(experiments_bp)
+    app.register_blueprint(uniprot_bp)
     
     # Health check endpoint
     @app.route('/health', methods=['GET'])

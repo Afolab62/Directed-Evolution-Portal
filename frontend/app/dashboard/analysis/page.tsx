@@ -38,7 +38,9 @@ function AnalysisContent() {
       if (!user) return
       
       try {
-        const res = await fetch(`/api/experiments?userId=${user.id}`)
+        const res = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'}/api/experiments?userId=${user.id}`, {
+          credentials: 'include'
+        })
         const data = await res.json()
         if (data.success) {
           const validExps = data.experiments.filter((e: Experiment) => e.validationStatus === 'valid')
@@ -71,7 +73,9 @@ function AnalysisContent() {
       }
 
       try {
-        const res = await fetch(`/api/experiments/${selectedExpId}`)
+        const res = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'}/api/experiments/${selectedExpId}`, {
+          credentials: 'include'
+        })
         const data = await res.json()
         
         if (data.success) {

@@ -1,0 +1,13 @@
+{
+  "name": "directed-evolution-portal",
+  "version": "1.0.0",
+  "description": "Directed Evolution Portal - Full Stack Application",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\" --names \"backend,frontend\" --prefix-colors \"blue,green\"",
+    "dev:backend": "cd backend && python run.py",
+    "dev:frontend": "cd frontend && pnpm dev"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

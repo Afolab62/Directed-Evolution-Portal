@@ -54,7 +54,9 @@ export default function ExperimentDetailPage() {
 
   const loadExperiment = async () => {
     try {
-      const res = await fetch(`/api/experiments/${id}`);
+      const res = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'}/api/experiments/${id}`, {
+        credentials: 'include'
+      });
       const data = await res.json();
 
       if (data.success) {
@@ -79,6 +81,15 @@ export default function ExperimentDetailPage() {
     setUploadResult(null);
 
     try {
+      // TODO: Implement client-side parsing or backend parse endpoint
+      toast({ 
+        title: 'Parsing not yet implemented',
+        description: 'Parse functionality needs to be migrated',
+        variant: 'destructive'
+      });
+      setIsUploading(false);
+      return;
+      
       const content = await file.text();
       const format = file.name.endsWith(".json") ? "json" : "tsv";
 

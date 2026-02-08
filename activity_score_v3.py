@@ -219,30 +219,3 @@ def write_activity_scores_to_db(scored_df, db_path):
 			if_exists = if_exists,
 			index = False
 	)
-
-
-path = '/Users/minaal/Downloads/example.tsv'
-df = pd.read_csv(path, sep = '\t')
-x = compute_activity_score(df)
-print(x)
-
-# how many are 'NaN'?
-y = x['activity_score'].isna().sum()
-print(y)
-
-# why are they 'NaN'?
-z = x.loc[x['activity_score'].isna(), ['dna_corrected', 'protein_corrected', 'Control']]
-print(z)
-
-a = x['dna_baseline']
-print(a)
-
-b = x.loc[x["Control"] == True, "dna_baseline"].describe()
-print(b)
-
-top_10 = x.sort_values(
-	by = 'activity_score',
-	ascending = False
-).head(10)
-
-print(top_10)

@@ -4,6 +4,12 @@ This module stages a directed evolution experiment by validating that an uploade
 
 ---
 
+## Requirements
+- Python 3.11+  
+- Flask + dependencies installed via `requirements.txt`
+
+---
+
 ## What This Does
 - Fetches WT protein FASTA and feature table from UniProt
 - Validates that the plasmid encodes the WT protein
@@ -87,6 +93,22 @@ Open in browser:
 
 ---
 
-## Notes
-- Large plasmids trigger a size guard to avoid slow alignment.
-- UniProt feature table is included for domain context.
+## Troubleshooting
+- **Internal Server Error (Flask‑Login):** add a temporary `user_loader` in `app/__init__.py` for demo mode.  
+- **UniProt errors:** invalid accession or network issue — try a known accession (e.g., O34996).  
+- **Large FASTA takes long:** alignment step is skipped by size guard for safety.
+
+---
+
+## Limitations
+- Smith–Waterman alignment is O(nm); size guard skips alignment for very large inputs.  
+- Validation requires the plasmid to actually encode the chosen UniProt protein.  
+- UniProt feature table is stored as‑is without further curation.
+
+---
+
+## References
+- UniProt REST API: https://academic.oup.com/nar/article/53/W1/W547/8126256  
+- Plasmid circular DNA background: https://www.britannica.com/science/plasmid  
+- Six‑frame translation tool (EMBOSS sixpack): https://emboss.bioinformatics.nl/cgi-bin/emboss/sixpack  
+- Smith–Waterman local alignment tradeoffs: https://bmcbioinformatics.biomedcentral.com/articles/10.1186/1471-2105-12-221  

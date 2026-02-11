@@ -19,7 +19,7 @@ This module stages a directed evolution experiment by validating that an uploade
 
 ---
 
-## How Validation Works (Short)
+## How Validation Works 
 1. Circular handling: plasmid is doubled to detect wraparound genes  
 2. Six‑frame translation: check all strands/frames  
 3. Tiered matching: exact → fuzzy → Smith–Waterman (indel‑capable)  
@@ -94,9 +94,9 @@ Open in browser:
 ---
 
 ## Troubleshooting
-- **Internal Server Error (Flask‑Login):** add a temporary `user_loader` in `app/__init__.py` for demo mode.  
-- **UniProt errors:** invalid accession or network issue — try a known accession (e.g., O34996).  
-- **Large FASTA takes long:** alignment step is skipped by size guard for safety.
+- Internal Server Error (Flask‑Login): add a temporary `user_loader` in `app/__init__.py` for demo mode.  
+- UniProt errors: invalid accession or network issue — try a known accession (e.g., O34996).  
+- Large FASTA takes long: alignment step is skipped by size guard for safety.
 
 ---
 
@@ -108,7 +108,7 @@ Open in browser:
 ---
 
 ## References
-- UniProt REST API: https://academic.oup.com/nar/article/53/W1/W547/8126256  
-- Plasmid circular DNA background: https://www.britannica.com/science/plasmid  
-- Six‑frame translation tool (EMBOSS sixpack): https://emboss.bioinformatics.nl/cgi-bin/emboss/sixpack  
-- Smith–Waterman local alignment tradeoffs: https://bmcbioinformatics.biomedcentral.com/articles/10.1186/1471-2105-12-221  
+- UniProt Consortium. *UniProt: the Universal Protein Knowledgebase in 2025*. **Nucleic Acids Research** (2025). DOI: 10.1093/nar/gkaf005  
+- Smillie C. et al. *Mobility of plasmids*. **Microbiology and Molecular Biology Reviews** (2010). DOI: 10.1128/MMBR.00020-10  
+- Smith TF, Waterman MS. *Identification of common molecular subsequences*. **Journal of Molecular Biology** (1981). DOI: 10.1016/0022-2836(81)90087-5  
+- Rice P, Longden I, Bleasby A. *EMBOSS: The European Molecular Biology Open Software Suite*. **Trends in Genetics** (2000). DOI: 10.1016/S0168-9525(00)02024-2  

@@ -42,7 +42,9 @@ def get_top_performers(db_path="database.db"):
 
     return top_df
 
-#next step to use HTML to make it look professional 
+
+
+
 
 
 

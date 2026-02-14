@@ -52,14 +52,13 @@ def compute_activity_score(df):
 	Computes a generation-normalised Activity Score.
 
 	Activity Score is defined as baseline-corrected DNA yield divided by
-	baseline-corrected protein yield:
+	baseline-corrected protein expression:
 
 	DNA* = DNA(g, v) - DNA(g, control)
 	Protein* = Protein(g, v) - Protein(g, control)
 	ActivityScore = DNA*/ Protein*
 
 	Implementation Details:
-	- DNA* is clipped at 0, so DNA is only counted above baseline.
 	- A relative threshold is utilised, whereby there are two
 	  minimal values and the larger is implemented:
 	  The absolute minimal value (1e-6) prevents division by 
@@ -157,13 +156,13 @@ def compute_activity_score(df):
 
 	out['dna_corrected'] = (out['DNA_Quantification_fg'] - out['dna_baseline']).clip(lower = 0)
 	
-	r_protein = out['Protein_Quantification_pg'] - out['protein_baseline']
-	r_min = sc_min * out['protein_baseline']
-	protein_min = np.maximum(abs_min, r_min)
+	protein_ex = out['Protein_Quantification_pg'] - out['protein_baseline']
+	rel_min = sc_min * out['protein_baseline']
+	protein_min = np.maximum(abs_min, rel_min)
 	
 	# the following command enforces the minimum allowed protein value.
 
-	out['protein_corrected'] = np.where(r_protein < protein_min, protein_min, r_protein)
+	out['protein_corrected'] = np.where(protein_ex < protein_min, protein_min, protein_ex)
 	
 	# the following commands calculate the activity score.
 

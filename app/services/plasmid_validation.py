@@ -224,7 +224,7 @@ def _best_fuzzy_identity(hay: str, needle: str) -> Tuple[float, int]:
 # Smith–Waterman local alignment
 # ----------------------------
 
-def _smith_waterman_local(q: str, t: str, *, match: int = 2, mismatch: int = -1, gap: int = -2) -> Dict[str, Any]:
+def _smith_waterman_local_fallback(q: str, t: str, *, match: int = 2, mismatch: int = -1, gap: int = -2) -> Dict[str, Any]:
     """
     Classic Smith–Waterman local alignment (O(n*m)).
     Returns dict with:
@@ -317,6 +317,62 @@ def _smith_waterman_local(q: str, t: str, *, match: int = 2, mismatch: int = -1,
         "t_end": t_end,
         "aligned_q": "".join(aligned_q),
         "aligned_t": "".join(aligned_t),
+        "matches": matches,
+        "aligned_query_len": aligned_query_len,
+    }
+
+
+def _smith_waterman_local(q: str, t: str, *, match: int = 2, mismatch: int = -1, gap: int = -2) -> Dict[str, Any]:
+    """
+    Smith–Waterman local alignment using Biopython when available (PairwiseAligner).
+    Falls back to the in-house implementation if Biopython is missing.
+    """
+    try:
+        from Bio.Align import PairwiseAligner
+    except Exception:
+        return _smith_waterman_local_fallback(q, t, match=match, mismatch=mismatch, gap=gap)
+
+    # Configure local alignment
+    aligner = PairwiseAligner()
+    aligner.mode = "local"
+    aligner.match_score = match
+    aligner.mismatch_score = mismatch
+    aligner.open_gap_score = gap
+    aligner.extend_gap_score = gap
+
+    alignments = aligner.align(q, t)
+    if not alignments:
+        return _smith_waterman_local_fallback(q, t, match=match, mismatch=mismatch, gap=gap)
+
+    aln = alignments[0]
+    # aln.aligned is a tuple of (query_blocks, target_blocks)
+    q_blocks, t_blocks = aln.aligned
+    if len(q_blocks) == 0 or len(t_blocks) == 0:
+        return _smith_waterman_local_fallback(q, t, match=match, mismatch=mismatch, gap=gap)
+
+    q_start = int(q_blocks[0][0])
+    q_end = int(q_blocks[-1][1])
+    t_start = int(t_blocks[0][0])
+    t_end = int(t_blocks[-1][1])
+
+    aligned_query_len = 0
+    matches = 0
+    for (qs, qe), (ts, te) in zip(q_blocks, t_blocks):
+        aligned_query_len += int(qe - qs)
+        for i in range(qe - qs):
+            aq = q[qs + i]
+            at = t[ts + i]
+            if aq == at or aq == "X" or at == "X":
+                matches += 1
+
+    return {
+        "score": int(aln.score),
+        "q_start": q_start,
+        "q_end": q_end,
+        "t_start": t_start,
+        "t_end": t_end,
+        "aligned_q": "",
+        "aligned_t": "",
         "matches": matches,
         "aligned_query_len": aligned_query_len,
     }
@@ -698,4 +754,3 @@ def find_wt_in_plasmid(
         notes=best.notes,
         diagnostics=diagnostics,
     )
-

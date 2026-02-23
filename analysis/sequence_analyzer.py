@@ -2,9 +2,12 @@ import logging
 from typing import List, Tuple, Optional
 
 from Bio.Seq import Seq
-from Bio import pairwise2
+from Bio.Align import PairwiseAligner
 
-from models import MutationInfo, StagingResult
+try:
+    from database.models import MutationInfo, StagingResult
+except ImportError:  # pragma: no cover
+    from models import MutationInfo, StagingResult
 
 
 logger = logging.getLogger(__name__)
@@ -70,9 +73,9 @@ class SequenceAnalyzer:
         else:
             self._locate_wt_gene()
 
-    
+    # ------------------------------------------------------------------
     # Staging result integration
-    
+    # ------------------------------------------------------------------
 
     def _load_from_staging(self, sr: StagingResult) -> None:
         """
@@ -113,24 +116,34 @@ class SequenceAnalyzer:
             f"coverage={sr.coverage:.3f}"
         )
 
-    
+    # ------------------------------------------------------------------
     # Internal alignment helpers (fallback only)
-    
+    # ------------------------------------------------------------------
 
     def _smith_waterman(self, seq1: str, seq2: str, match=2, mismatch=-1, gap=-1) -> Tuple[int, int, int]:
         """
-        Smith-Waterman local alignment using BioPython's pairwise2.
+        Smith-Waterman local alignment using BioPython's PairwiseAligner.
         Returns: (score, start_pos_in_seq1, end_pos_in_seq1)
         """
-        alignments = pairwise2.align.localms(
-            seq1, seq2,
-            match, mismatch, gap, gap,
-            one_alignment_only=True
-        )
-        if not alignments:
+        aligner = PairwiseAligner()
+        aligner.mode = "local"
+        aligner.match_score = match
+        aligner.mismatch_score = mismatch
+        aligner.open_gap_score = gap
+        aligner.extend_gap_score = gap
+
+        alignments = aligner.align(seq1, seq2)
+        if len(alignments) == 0:
             return 0, 0, 0
+
         best = alignments[0]
-        return int(best.score), best.start, best.end
+        target_blocks = best.aligned[0]
+        if len(target_blocks) == 0:
+            return int(best.score), 0, 0
+
+        start = int(target_blocks[0][0])
+        end = int(target_blocks[-1][1])
+        return int(best.score), start, end
 
     def _translate(self, dna_seq: str) -> str:
         """Translate DNA to protein sequence using BioPython."""
@@ -179,9 +192,10 @@ class SequenceAnalyzer:
             f"start={self.wt_gene_start}, length={len(self.wt_gene_seq)}"
         )
 
-    
+    # ------------------------------------------------------------------
     # Core analysis
-    
+    # ------------------------------------------------------------------
+
     def extract_gene_from_variant(self, variant_plasmid_seq: str) -> str:
         """Extract the gene region from a variant plasmid using WT coordinates."""
         variant_plasmid_seq = variant_plasmid_seq.upper().strip()
@@ -213,8 +227,10 @@ class SequenceAnalyzer:
         mutations = []
 
         if len(variant_gene) != len(self.wt_gene_seq):
-            logger.warning(f"Length mismatch: variant={len(variant_gene)}, WT={len(self.wt_gene_seq)}")
-            return mutations
+            raise ValueError(
+                f"Gene length mismatch (variant={len(variant_gene)} bp, WT={len(self.wt_gene_seq)} bp). "
+                "This likely indicates an indel or frameshift. Codon-level comparison cannot proceed."
+            )
 
         for i in range(0, len(self.wt_gene_seq) - 2, 3):
             wt_codon = self.wt_gene_seq[i:i+3]

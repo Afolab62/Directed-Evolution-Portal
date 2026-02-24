@@ -1,14 +1,39 @@
-#This code connects to the SQLite database, executes your SQL query, loads the result into a Pandas DataFrame,
-#  closes the connection automatically, and returns the DataFrame.
+"""
+analysis/get_top_performers.py
+--------------------------------
+Query and return the top 10 performing variants by activity score.
+
+This module only reads from the DB — all write operations happen
+in the parsing/analysis pipeline, not here.
+"""
+
 import sqlite3
 import pandas as pd
+import logging
+
+logger = logging.getLogger(__name__)
 
 
+def get_top_performers(db_path: str = "database.db") -> pd.DataFrame:
+    """
+    Return the top 10 non-control variants ranked by activity_score (descending).
 
+    Joins variants, activity_scores, and mutations tables.
+    Excludes controls and rows with null activity scores.
 
+    Parameters
+    ----------
+    db_path : str
+        Path to the SQLite database.
 
-def get_top_performers(db_path="database.db"):
-
+    Returns
+    -------
+    pd.DataFrame with columns:
+        Plasmid_Variant_Index, Parent_Plasmid_Variant,
+        Directed_Evolution_Generation, DNA_Quantification_fg,
+        Protein_Quantification_pg, activity_score,
+        Total_Mutations, Synonymous_Count, Non_Synonymous_Count
+    """
     query = """
     SELECT
         v.Plasmid_Variant_Index,
@@ -38,17 +63,10 @@ def get_top_performers(db_path="database.db"):
     """
 
     with sqlite3.connect(db_path) as con:
-        top_df = pd.read_sql(query, con)
+        df = pd.read_sql(query, con)
 
-    return top_df
+    if df.empty:
+        logger.warning("No top performer data found — check that analysis has been run.")
 
-
-
-
-
-
-
-
-
-        
-
+    logger.info(f"Top performers fetched: {len(df)} rows.")
+    return df

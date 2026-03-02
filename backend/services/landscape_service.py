@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.interpolate import griddata
+from scipy.ndimage import gaussian_filter
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 
@@ -99,7 +100,7 @@ def compute_fitness_landscape(
         points=(x_coords, y_coords),
         values=z_coords,
         xi=(grid_x, grid_y),
-        method="cubic"
+        method="linear"
     )
 
     # Fill NaN edges with nearest-neighbour interpolation
@@ -111,6 +112,9 @@ def compute_fitness_landscape(
     )
     nan_mask = np.isnan(grid_z)
     grid_z[nan_mask] = grid_z_filled[nan_mask]
+
+    # Gaussian smoothing to produce a smooth rolling landscape surface
+    grid_z = gaussian_filter(grid_z, sigma=1.5)
 
     return {
         "x": grid_x.tolist(),

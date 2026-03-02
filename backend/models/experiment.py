@@ -106,7 +106,7 @@ class VariantData(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     
     # Relationships
-    mutations = relationship("Mutation", back_populates="variant", cascade="all, delete-orphan")
+    mutations = relationship("Mutation", back_populates="variant", cascade="all, delete-orphan", lazy="select")
     
     def to_dict(self, include_sequences=False, include_mutations=False):
         """Convert variant to dictionary"""
@@ -124,18 +124,25 @@ class VariantData(Base):
             'qcMessage': self.qc_message,
             'metadata': self.extra_metadata or {},
             'createdAt': self.created_at.isoformat(),
+            # Always include whether sequence analysis has been run
+            'proteinSequence': self.protein_sequence,
         }
-        
-        # Always include mutation count for performance
-        data['mutationCount'] = len(self.mutations) if self.mutations else 0
-        
-        # Only include full mutation details if explicitly requested
+
         if include_mutations:
+            # Explicitly requested — load and serialise mutations
             data['mutations'] = [m.to_dict() for m in self.mutations] if self.mutations else []
-        
+            data['mutationCount'] = len(data['mutations'])
+        else:
+            # Avoid firing a lazy-load query just for the count.
+            # SQLAlchemy stores loaded relationship collections in __dict__.
+            if 'mutations' in self.__dict__:
+                data['mutationCount'] = len(self.__dict__['mutations'])
+            else:
+                data['mutationCount'] = 0
+
         if include_sequences:
             data['assembledDNASequence'] = self.assembled_dna_sequence
-            data['proteinSequence'] = self.protein_sequence
+            # proteinSequence already included by default above
         
         return data
 

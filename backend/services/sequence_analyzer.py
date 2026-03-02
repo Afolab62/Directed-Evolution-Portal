@@ -197,6 +197,54 @@ def identify_mutations(wt_gene_dna: str, var_gene_dna: str) -> List[Dict]:
     return mutations
 
 
+
+def locate_gene_fast(wt_plasmid_seq: str, wt_protein_seq: str) -> Tuple[str, int, int]:
+    """
+    Quickly locate the gene encoding wt_protein_seq in the plasmid.
+
+    Strategy:
+    1. Translate every frame (0-2) of the doubled plasmid (fwd + rc)
+       using Python str.find() — O(n), sub-millisecond for typical plasmids.
+    2. Match on progressively shorter prefixes (50 → 30 → 15 AA) for
+       robustness against occasional leading-residue differences.
+    3. Falls back to Smith-Waterman only if no string match is found.
+    """
+    plasmid = _clean(wt_plasmid_seq)
+    protein = _clean(wt_protein_seq)
+    L = len(plasmid)
+    extended = plasmid + plasmid  # handle wrap-around
+
+    for prefix_len in (min(50, len(protein)), min(30, len(protein)), min(15, len(protein))):
+        prefix = protein[:prefix_len]
+        for strand_seq, is_rc in [(extended, False), (_reverse_complement(extended), True)]:
+            for frame in range(3):
+                translated = _translate_full(strand_seq[frame:])
+                pos = translated.find(prefix)
+                if pos == -1:
+                    continue
+
+                # Expand to full protein length
+                dna_start = frame + pos * 3
+                dna_end   = frame + (pos + len(protein)) * 3
+
+                if dna_end > len(strand_seq):
+                    continue
+
+                gene_dna = strand_seq[dna_start:dna_end]
+                gene_start = dna_start % L
+                gene_length = dna_end - dna_start
+
+                gene_protein = _translate(gene_dna)
+                print(f"  Gene found (prefix={prefix_len}AA, frame={frame}, rc={is_rc}): "
+                      f"start={gene_start}, length={gene_length}bp ({len(gene_protein)} AA)")
+                print(f"  First 50 AA: {gene_protein[:50]}")
+                return gene_dna, gene_start, gene_length
+
+    # No exact prefix match -- fall back to Smith-Waterman
+    print("  Fast search missed -- falling back to Smith-Waterman (this may take ~30s)...")
+    return locate_gene_sw(wt_plasmid_seq, wt_protein_seq)
+
+
 class SequenceAnalyzer:
     """
     Analyzes a batch of variant plasmids against a WT reference.
@@ -216,8 +264,8 @@ class SequenceAnalyzer:
         wt_plasmid_sequence: str,
     ) -> List[Dict]:
         """
-        Locate WT gene once with Smith-Waterman, then extract the same DNA
-        region from every variant and call identify_mutations().
+        Locate WT gene once -- fast string search with SW fallback -- then extract
+        the same DNA region from every variant and call identify_mutations().
 
         Each item in variants_data must contain:
             id, assembled_dna_sequence  (and any other keys to pass through)
@@ -228,9 +276,9 @@ class SequenceAnalyzer:
         print(f"  WT plasmid length : {len(wt_plasmid_sequence.strip())} bp")
         print(f"  WT protein length : {len(wt_protein_sequence.strip())} AA")
 
-        # ── Step 1: locate gene in WT plasmid ────────────────────────────────
-        print("  Locating WT gene via Smith-Waterman alignment...")
-        wt_gene_dna, gene_start, gene_length = locate_gene_sw(
+        # -- Step 1: locate gene in WT plasmid --
+        print("  Locating WT gene (fast search -> SW fallback)...")
+        wt_gene_dna, gene_start, gene_length = locate_gene_fast(
             wt_plasmid_sequence, wt_protein_sequence
         )
 

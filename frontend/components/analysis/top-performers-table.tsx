@@ -2,6 +2,7 @@
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -18,6 +19,7 @@ interface TopPerformersTableProps {
   onSelectVariant?: (index: number) => void;
   selectedVariant?: number | null;
   detailed?: boolean;
+  isLoading?: boolean;
 }
 
 export function TopPerformersTable({
@@ -25,7 +27,46 @@ export function TopPerformersTable({
   onSelectVariant,
   selectedVariant,
   detailed = false,
+  isLoading = false,
 }: TopPerformersTableProps) {
+  const columnCount = detailed ? 8 : 6;
+
+  if (isLoading) {
+    return (
+      <div className="overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-12">Rank</TableHead>
+              <TableHead>Variant Index</TableHead>
+              <TableHead>Generation</TableHead>
+              <TableHead>Activity Score</TableHead>
+              <TableHead>Total Mutations</TableHead>
+              {detailed && (
+                <>
+                  <TableHead>DNA Yield</TableHead>
+                  <TableHead>Protein Yield</TableHead>
+                </>
+              )}
+              <TableHead className="text-right">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {Array.from({ length: 10 }).map((_, i) => (
+              <TableRow key={i}>
+                {Array.from({ length: columnCount }).map((_, j) => (
+                  <TableCell key={j}>
+                    <Skeleton className="h-4 w-full" />
+                  </TableCell>
+                ))}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    );
+  }
+
   if (variants.length === 0) {
     return (
       <div className="text-center py-8 text-muted-foreground">
@@ -88,13 +129,17 @@ export function TopPerformersTable({
                 <span
                   className={cn(
                     "font-medium",
-                    (variant.mutations?.filter(m => m.type !== 'synonymous').length ?? 0) > 5 && "text-destructive",
-                    (variant.mutations?.filter(m => m.type !== 'synonymous').length ?? 0) > 0 &&
-                      (variant.mutations?.filter(m => m.type !== 'synonymous').length ?? 0) <= 5 &&
+                    (variant.mutations?.filter((m) => m.type !== "synonymous")
+                      .length ?? 0) > 5 && "text-destructive",
+                    (variant.mutations?.filter((m) => m.type !== "synonymous")
+                      .length ?? 0) > 0 &&
+                      (variant.mutations?.filter((m) => m.type !== "synonymous")
+                        .length ?? 0) <= 5 &&
                       "text-accent",
                   )}
                 >
-                  {variant.mutations?.filter(m => m.type !== 'synonymous').length ?? 0}
+                  {variant.mutations?.filter((m) => m.type !== "synonymous")
+                    .length ?? 0}
                 </span>
               </TableCell>
               {detailed && (

@@ -7,6 +7,7 @@ from dataclasses import asdict
 from typing import Any, Optional
 
 from .sequence_tools import parse_fasta_dna, parse_fasta_protein
+from .errors import FastaParseError, InvalidSequenceError
 from .plasmid_validation import find_wt_in_plasmid
 from .uniprot_client import (
     UniProtError,
@@ -59,6 +60,19 @@ def stage_experiment_validate_plasmid(
 
     except UniProtError as e:
         result["error"] = f"UniProt error: {e}"
+        return result
+    except FastaParseError as e:
+        result["error"] = (
+            f"Invalid plasmid file: {e}. "
+            "Please upload a FASTA file containing a single DNA sequence "
+            "(must begin with a '>' header line)."
+        )
+        return result
+    except InvalidSequenceError as e:
+        result["error"] = (
+            f"Plasmid sequence contains invalid characters: {e}. "
+            "DNA sequences may only contain A, C, G, T and N (ambiguous base)."
+        )
         return result
     except Exception as e:
         result["error"] = f"Unexpected error: {e}"

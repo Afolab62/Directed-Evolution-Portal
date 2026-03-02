@@ -1,3 +1,12 @@
+import sys
+import io
+
+# Force UTF-8 stdout/stderr on Windows so print() never throws charmap errors
+if sys.stdout and hasattr(sys.stdout, 'buffer'):
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+if sys.stderr and hasattr(sys.stderr, 'buffer'):
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
 from flask import Flask
 from flask_cors import CORS
 from flask_session import Session

@@ -50,8 +50,8 @@ export interface VariantData {
   plasmidVariantIndex: number;
   parentPlasmidVariant: number | null;
   generation: number;
-  assembledDNASequence: string;
-  proteinSequence: string;
+  assembledDNASequence?: string;
+  proteinSequence: string | null;
   dnaYield: number;
   proteinYield: number;
   activityScore: number;

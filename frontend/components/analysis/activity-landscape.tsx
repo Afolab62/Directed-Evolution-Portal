@@ -85,7 +85,9 @@ export function ActivityLandscape({
     );
   }
 
-  const analysedCount = variants.filter((v) => v.proteinSequence).length;
+  const analysedCount = variants.filter(
+    (v) => v.proteinSequence || (v.mutationCount !== undefined && v.mutationCount > 0),
+  ).length;
   if (analysedCount < 3) {
     return (
       <Card>

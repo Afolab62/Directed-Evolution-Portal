@@ -26,6 +26,7 @@ import {
   BarChart3,
   Dna,
   AlertTriangle,
+  X,
 } from "lucide-react";
 import type { Experiment, VariantData } from "@/lib/types";
 
@@ -39,6 +40,8 @@ export default function ExperimentDetailPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [justCompleted, setJustCompleted] = useState(false);
+  const [analysisBanner, setAnalysisBanner] = useState<{ message: string } | null>(null);
   const [uploadResult, setUploadResult] = useState<{
     parsed: number;
     processed: number;
@@ -52,32 +55,44 @@ export default function ExperimentDetailPage() {
     loadExperiment();
   }, [id]);
 
-  // Poll every 3 seconds while analysis is running in the background
+  // Poll every 5 seconds while analysis is running — status only, no variants
   useEffect(() => {
     if (experiment?.analysisStatus !== "analyzing") return;
 
     const interval = setInterval(async () => {
       try {
         const res = await fetch(
-          `${process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000"}/api/experiments/${id}`,
+          `${process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000"}/api/experiments/${id}?include_variants=false`,
           { credentials: "include" },
         );
         const data = await res.json();
         if (data.success) {
+          // Only update experiment metadata — variants haven't changed
           setExperiment(data.experiment);
-          setVariants(data.variants || []);
           if (data.experiment.analysisStatus !== "analyzing") {
             clearInterval(interval);
             setIsAnalyzing(false);
             if (data.experiment.analysisStatus === "completed") {
+              setJustCompleted(true);
+              // Keep the success state visible for 5s before settling on "Re-analyze"
+              setTimeout(() => setJustCompleted(false), 5000);
+              // Show persistent banner
+              setAnalysisBanner({
+                message: data.experiment.analysisMessage || "Sequences analyzed successfully",
+              });
+              // Reload variants now that analysis is done
+              loadExperiment();
               toast({
                 title: "Analysis Complete!",
-                description: data.experiment.analysisMessage || "Sequences analyzed successfully",
+                description:
+                  data.experiment.analysisMessage ||
+                  "Sequences analyzed successfully",
               });
             } else if (data.experiment.analysisStatus === "failed") {
               toast({
                 title: "Analysis Failed",
-                description: data.experiment.analysisMessage || "An error occurred",
+                description:
+                  data.experiment.analysisMessage || "An error occurred",
                 variant: "destructive",
               });
             }
@@ -86,7 +101,7 @@ export default function ExperimentDetailPage() {
       } catch {
         // Network error — keep polling
       }
-    }, 3000);
+    }, 5000);
 
     return () => clearInterval(interval);
   }, [experiment?.analysisStatus, id]);
@@ -164,6 +179,8 @@ export default function ExperimentDetailPage() {
     if (!experiment) return;
 
     setIsAnalyzing(true);
+    setJustCompleted(false);
+    setAnalysisBanner(null);
 
     try {
       const res = await fetch(
@@ -181,7 +198,8 @@ export default function ExperimentDetailPage() {
         // Update local state so polling useEffect kicks in.
         toast({
           title: "Analysis Started",
-          description: "Running in background — status will update automatically.",
+          description:
+            "Running in background — status will update automatically.",
         });
         setExperiment((prev) =>
           prev ? { ...prev, analysisStatus: "analyzing" } : prev,
@@ -560,12 +578,16 @@ export default function ExperimentDetailPage() {
                   <Button
                     onClick={handleAnalyzeSequences}
                     disabled={
-                      isAnalyzing || experiment.analysisStatus === "analyzing"
+                      isAnalyzing ||
+                      experiment.analysisStatus === "analyzing"
                     }
-                    variant={
-                      experiment.analysisStatus === "completed"
-                        ? "outline"
-                        : "default"
+                    variant="outline"
+                    className={
+                      justCompleted
+                        ? "border-green-500 bg-green-50 text-green-700 hover:bg-green-100 dark:bg-green-950 dark:text-green-400 dark:border-green-700 dark:hover:bg-green-900"
+                        : experiment.analysisStatus === "completed"
+                          ? "border-green-500 text-green-700 hover:bg-green-50 dark:text-green-400 dark:border-green-700 dark:hover:bg-green-950"
+                          : "border-transparent bg-primary text-primary-foreground hover:bg-primary/90"
                     }
                   >
                     {isAnalyzing ||
@@ -574,9 +596,14 @@ export default function ExperimentDetailPage() {
                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                         Analyzing...
                       </>
+                    ) : justCompleted ? (
+                      <>
+                        <CheckCircle2 className="h-4 w-4 mr-2" />
+                        Analysis Complete!
+                      </>
                     ) : experiment.analysisStatus === "completed" ? (
                       <>
-                        <Dna className="h-4 w-4 mr-2" />
+                        <CheckCircle2 className="h-4 w-4 mr-2" />
                         Re-analyze
                       </>
                     ) : (
@@ -587,6 +614,18 @@ export default function ExperimentDetailPage() {
                     )}
                   </Button>
                 </div>
+                {analysisBanner && (
+                  <div className="flex items-start gap-3 p-3 rounded-lg bg-green-50 border border-green-200 text-green-800 dark:bg-green-950 dark:border-green-800 dark:text-green-300">
+                    <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" />
+                    <p className="text-sm flex-1">{analysisBanner.message}</p>
+                    <button
+                      onClick={() => setAnalysisBanner(null)}
+                      className="shrink-0 text-green-600 hover:text-green-800 dark:text-green-400 dark:hover:text-green-200"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                )}
                 <div className="text-sm text-muted-foreground space-y-1">
                   <p>• Translates DNA sequences to protein sequences</p>
                   <p>• Detects mutations compared to wild-type</p>

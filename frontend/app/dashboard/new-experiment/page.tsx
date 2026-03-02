@@ -89,6 +89,40 @@ export default function NewExperimentPage() {
     const reader = new FileReader();
     reader.onload = (event) => {
       const content = event.target?.result as string;
+
+      // Validate: must have at least one FASTA header line
+      const lines = content.split("\n");
+      const firstNonEmpty = lines.find((l) => l.trim().length > 0)?.trim() ?? "";
+      if (!firstNonEmpty.startsWith(">")) {
+        toast({
+          title: "Invalid file format",
+          description:
+            "The file does not appear to be a FASTA file. The first line must start with \">\" (e.g. \">MyPlasmid\"). Please upload a valid .fasta or .fa file.",
+          variant: "destructive",
+        });
+        // Reset the input so the same file can be re-selected after correction
+        e.target.value = "";
+        return;
+      }
+
+      // Validate: sequence lines must only contain valid DNA characters
+      const invalidChars = new Set<string>();
+      for (const line of lines) {
+        if (line.trim().startsWith(">") || line.trim().length === 0) continue;
+        for (const ch of line.trim().toUpperCase()) {
+          if (!"ACGTN".includes(ch)) invalidChars.add(ch);
+        }
+      }
+      if (invalidChars.size > 0) {
+        toast({
+          title: "Invalid sequence characters",
+          description: `The file contains non-DNA characters: ${[...invalidChars].join(", ")}. DNA sequences may only contain A, C, G, T and N.`,
+          variant: "destructive",
+        });
+        e.target.value = "";
+        return;
+      }
+
       setPlasmidSequence(content);
 
       // Extract name from FASTA header if present

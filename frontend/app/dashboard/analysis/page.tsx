@@ -40,14 +40,18 @@ function AnalysisContent() {
   const [selectedExperiment, setSelectedExperiment] =
     useState<Experiment | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingTopPerformers, setIsLoadingTopPerformers] = useState(false);
   const [selectedVariantIndex, setSelectedVariantIndex] = useState<
     number | null
   >(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [variantError, setVariantError] = useState<string | null>(null);
 
   // Load experiments list
   useEffect(() => {
     async function loadExperiments() {
       if (!user) return;
+      setLoadError(null);
 
       try {
         const res = await fetch(
@@ -56,6 +60,7 @@ function AnalysisContent() {
             credentials: "include",
           },
         );
+        if (!res.ok) throw new Error(`Server error ${res.status}`);
         const data = await res.json();
         if (data.success) {
           const validExps = data.experiments.filter(
@@ -72,6 +77,9 @@ function AnalysisContent() {
         }
       } catch (err) {
         console.error("Failed to load experiments:", err);
+        setLoadError(
+          err instanceof Error ? err.message : "Failed to load experiments. Please refresh the page."
+        );
       } finally {
         setIsLoading(false);
       }
@@ -86,8 +94,10 @@ function AnalysisContent() {
       if (!selectedExpId) {
         setVariants([]);
         setSelectedExperiment(null);
+        setVariantError(null);
         return;
       }
+      setVariantError(null);
 
       try {
         const res = await fetch(
@@ -96,14 +106,20 @@ function AnalysisContent() {
             credentials: "include",
           },
         );
+        if (!res.ok) throw new Error(`Server error ${res.status}`);
         const data = await res.json();
 
         if (data.success) {
           setSelectedExperiment(data.experiment);
           setVariants(data.variants || []);
+        } else {
+          throw new Error(data.error || "Failed to load experiment data");
         }
       } catch (err) {
         console.error("Failed to load variants:", err);
+        setVariantError(
+          err instanceof Error ? err.message : "Failed to load variant data."
+        );
       }
     }
 
@@ -118,6 +134,7 @@ function AnalysisContent() {
         return;
       }
 
+      setIsLoadingTopPerformers(true);
       try {
         const res = await fetch(
           `${process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000"}/api/experiments/${selectedExpId}/top-performers?limit=10&include_mutations=true`,
@@ -132,6 +149,8 @@ function AnalysisContent() {
         }
       } catch (err) {
         console.error("Failed to load top performers:", err);
+      } finally {
+        setIsLoadingTopPerformers(false);
       }
     }
 
@@ -140,6 +159,18 @@ function AnalysisContent() {
 
   if (isLoading) {
     return null;
+  }
+
+  if (loadError) {
+    return (
+      <Card>
+        <CardContent className="py-12 text-center">
+          <AlertCircle className="h-12 w-12 mx-auto text-destructive/70 mb-3" />
+          <p className="text-destructive font-medium">Failed to load experiments</p>
+          <p className="text-muted-foreground text-sm mt-1">{loadError}</p>
+        </CardContent>
+      </Card>
+    );
   }
 
   const passedVariants = variants.filter((v) => v.qcStatus === "passed");
@@ -187,6 +218,14 @@ function AnalysisContent() {
             <p className="text-muted-foreground">
               Select an experiment above to view analysis
             </p>
+          </CardContent>
+        </Card>
+      ) : variantError ? (
+        <Card>
+          <CardContent className="py-12 text-center">
+            <AlertCircle className="h-12 w-12 mx-auto text-destructive/70 mb-3" />
+            <p className="text-destructive font-medium">Failed to load experiment data</p>
+            <p className="text-muted-foreground text-sm mt-1">{variantError}</p>
           </CardContent>
         </Card>
       ) : variants.length === 0 ? (
@@ -271,6 +310,7 @@ function AnalysisContent() {
                     variants={topPerformers}
                     onSelectVariant={(idx) => setSelectedVariantIndex(idx)}
                     selectedVariant={selectedVariantIndex}
+                    isLoading={isLoadingTopPerformers}
                   />
                 </CardContent>
               </Card>
@@ -290,6 +330,7 @@ function AnalysisContent() {
                     variants={topPerformers}
                     onSelectVariant={(idx) => setSelectedVariantIndex(idx)}
                     selectedVariant={selectedVariantIndex}
+                    isLoading={isLoadingTopPerformers}
                     detailed
                   />
                 </CardContent>
@@ -299,7 +340,7 @@ function AnalysisContent() {
             <TabsContent value="mutations" className="mt-6">
               <MutationFingerprint
                 variants={topPerformers}
-                wtSequence={selectedExperiment?.wtProteinSequence || ""}
+                experimentId={selectedExpId}
                 selectedVariantIndex={selectedVariantIndex}
                 onSelectVariant={(idx) => setSelectedVariantIndex(idx)}
               />

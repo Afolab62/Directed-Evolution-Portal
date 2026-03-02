@@ -99,7 +99,7 @@ def compute_activity_score(df):
 
 	# baseline-corrected DNA and baseline-corrected protein yield calculation 
 
-	out['dna*'] = (out['DNA_Quantification_fg'] - out['dna_baseline']).clip(lower = 0)
+	out['dna*'] = (out['DNA_Quantification_fg'] - out['dna_baseline'])
 	
 	out['protein*'] = out['Protein_Quantification_pg'] - out['protein_baseline']	
 	

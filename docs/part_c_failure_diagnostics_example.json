@@ -1,0 +1,85 @@
+{
+  "schema_version": "1.0",
+  "inputs": {
+    "uniprot_accession": null,
+    "plasmid_length_nt": 7835,
+    "codon_table_source": "standard"
+  },
+  "params": {
+    "min_wt_len": 30,
+    "min_identity": 0.95,
+    "align_min_identity": 0.9,
+    "align_min_coverage": 0.95,
+    "max_align_wt_len": 2000,
+    "max_align_plasmid_len": 200000,
+    "allow_slow_alignment": false
+  },
+  "timing_seconds": 0.237656,
+  "validation": {
+    "is_valid": false,
+    "strand": null,
+    "frame": null,
+    "start_nt": null,
+    "end_nt_exclusive": null,
+    "wraps_origin": false,
+    "match_type": "none",
+    "identity": null,
+    "coverage": null,
+    "notes": "No exact match found. Fuzzy fallback did not reach threshold (min_identity=0.95). No alignment match met thresholds (identity>=0.90, coverage>=0.95).",
+    "diagnostics": {
+      "params": {
+        "min_wt_len": 30,
+        "min_identity": 0.95,
+        "align_min_identity": 0.9,
+        "align_min_coverage": 0.95,
+        "max_align_wt_len": 2000,
+        "max_align_plasmid_len": 200000,
+        "allow_slow_alignment": false,
+        "fuzzy_fallback": true
+      },
+      "top_fuzzy_candidates": [
+        {
+          "frame": "-1",
+          "best_identity": 0.175,
+          "passed": false,
+          "used_x_wildcard": false
+        },
+        {
+          "frame": "-2",
+          "best_identity": 0.175,
+          "passed": false,
+          "used_x_wildcard": false
+        },
+        {
+          "frame": "-0",
+          "best_identity": 0.15,
+          "passed": false,
+          "used_x_wildcard": false
+        }
+      ],
+      "top_alignment_candidates": [
+        {
+          "frame": "+1",
+          "identity": 0.75,
+          "coverage": 0.1,
+          "sw_score": 5,
+          "passed": false
+        },
+        {
+          "frame": "+2",
+          "identity": 0.75,
+          "coverage": 0.1,
+          "sw_score": 5,
+          "passed": false
+        },
+        {
+          "frame": "-0",
+          "identity": 0.666667,
+          "coverage": 0.075,
+          "sw_score": 3,
+          "passed": false
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "is_valid": true,
+  "strand": "+",
+  "frame": 0,
+  "start_nt": 5070,
+  "end_nt_exclusive": 7710,
+  "wraps_origin": false,
+  "match_type": "exact",
+  "notes": "Exact WT match found in frame +0. start2=5070, end2=7710 on doubled plasmid. Multiple hits found (2); selected best by ORF-context score=10."
+}

@@ -5,15 +5,52 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from typing import Any, Optional
+import hashlib
+import json
+from pathlib import Path
 
 from .sequence_tools import parse_fasta_dna, parse_fasta_protein
-from .errors import FastaParseError, InvalidSequenceError
 from .plasmid_validation import find_wt_in_plasmid
 from .uniprot_client import (
     UniProtError,
     fetch_uniprot_fasta,
-    fetch_uniprot_protein_metadata,
+    fetch_uniprot_features_json,
 )
+
+DEFAULT_VALIDATION_CACHE = Path("instance") / "validation_cache"
+
+
+def _cache_key(accession: str, plasmid_fasta_text: str, fetch_features: bool) -> str:
+    h = hashlib.sha1()
+    h.update(accession.strip().encode("utf-8"))
+    h.update(b"|")
+    h.update(plasmid_fasta_text.encode("utf-8"))
+    h.update(b"|")
+    h.update(b"1" if fetch_features else b"0")
+    return h.hexdigest()
+
+
+def _cache_paths(cache_dir: Path, key: str) -> Path:
+    return cache_dir / f"{key}.json"
+
+
+def _read_validation_cache(cache_dir: Path, key: str) -> Optional[dict[str, Any]]:
+    try:
+        path = _cache_paths(cache_dir, key)
+        if not path.exists():
+            return None
+        return json.loads(path.read_text())
+    except Exception:
+        return None
+
+
+def _write_validation_cache(cache_dir: Path, key: str, data: dict[str, Any]) -> None:
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        path = _cache_paths(cache_dir, key)
+        path.write_text(json.dumps(data))
+    except Exception:
+        return
 
 
 def stage_experiment_validate_plasmid(
@@ -22,58 +59,51 @@ def stage_experiment_validate_plasmid(
     fetch_features: bool = True,
 ) -> dict[str, Any]:
     """
-    Integration-ready staging function.
+    Integration-ready “Part C staging” function.
 
-    Returns a JSON-friendly dict: {accession, wt_protein, features, validation, error}.
+    Web routes can call this directly later. CLI can call it too.
+    Returns a JSON-friendly dict: {accession, wt_protein, features, validation, errors}.
     """
     result: dict[str, Any] = {
-        "accession": accession.strip(),
-        "wt_protein": None,
-        "features": None,
-        "validation": None,
-        "error": None,
+        "accession":    accession.strip(),
+        "wt_protein":   None,
+        "wt_plasmid_seq": None,
+        "features":     None,
+        "validation":   None,
+        "error":        None,
     }
+
+    # Optional cache for repeat demo runs or repeated inputs.
+    cache_key = _cache_key(accession, plasmid_fasta_text, fetch_features)
+    cached = _read_validation_cache(DEFAULT_VALIDATION_CACHE, cache_key)
+    if cached is not None:
+        return cached
 
     try:
         wt_fasta = fetch_uniprot_fasta(accession)
         wt_protein = parse_fasta_protein(wt_fasta)
         result["wt_protein"] = wt_protein
 
-        # Fetch full UniProt record with protein metadata
-        features_data: Optional[dict[str, Any]] = None
+        features: Optional[list[dict[str, Any]]] = None
         if fetch_features:
-            protein_metadata = fetch_uniprot_protein_metadata(accession)
-            # Extract relevant data from the full metadata
-            features_data = {
-                "name": protein_metadata.get("proteinDescription", {}).get("recommendedName", {}).get("fullName", {}).get("value"),
-                "organism": protein_metadata.get("organism", {}).get("scientificName"),
-                "features": protein_metadata.get("features", [])
-            }
-        result["features"] = features_data
+            # Features may be empty; that’s okay. We store what UniProt provides.
+            features = fetch_uniprot_features_json(accession)
+        result["features"] = features
 
         plasmid_dna = parse_fasta_dna(plasmid_fasta_text)
+        result["wt_plasmid_seq"] = plasmid_dna
 
         call = find_wt_in_plasmid(plasmid_dna, wt_protein)
         result["validation"] = asdict(call)
 
+        _write_validation_cache(DEFAULT_VALIDATION_CACHE, cache_key, result)
         return result
 
     except UniProtError as e:
         result["error"] = f"UniProt error: {e}"
-        return result
-    except FastaParseError as e:
-        result["error"] = (
-            f"Invalid plasmid file: {e}. "
-            "Please upload a FASTA file containing a single DNA sequence "
-            "(must begin with a '>' header line)."
-        )
-        return result
-    except InvalidSequenceError as e:
-        result["error"] = (
-            f"Plasmid sequence contains invalid characters: {e}. "
-            "DNA sequences may only contain A, C, G, T and N (ambiguous base)."
-        )
+        _write_validation_cache(DEFAULT_VALIDATION_CACHE, cache_key, result)
         return result
     except Exception as e:
         result["error"] = f"Unexpected error: {e}"
+        _write_validation_cache(DEFAULT_VALIDATION_CACHE, cache_key, result)
         return result

@@ -77,6 +77,8 @@ class _Candidate:
 # ----------------------------
 
 def _clean_dna(text: str) -> str:
+    # normalise to uppercase and strip whitespace/newlines — FASTA files
+    # often have line breaks mid-sequence that would break codon reading
     return text.strip().upper().replace("\n", "").replace("\r", "")
 
 
@@ -142,6 +144,11 @@ def _orf_context_score(plasmid_dna: str, strand: Strand, start_nt: int, end_nt_e
       +5 if start codon at start is ATG (for '+' only)
       +5 if a canonical stop codon immediately follows end (for '+' only)
     For '-' we skip the codon checks (still tie-break stable via 0).
+
+    ATG is the universal start codon in E. coli expression systems like pET-28a;
+    TAA/TAG/TGA are the three stop codons in the standard genetic code.
+    Rewarding their presence at the expected boundaries reduces false positives
+    when multiple ORFs achieve the same alignment score.
     """
     if strand != "+":
         return 0
@@ -224,7 +231,7 @@ def _best_fuzzy_identity(hay: str, needle: str) -> Tuple[float, int]:
 # Smith–Waterman local alignment
 # ----------------------------
 
-def _smith_waterman_local(q: str, t: str, *, match: int = 2, mismatch: int = -1, gap: int = -2) -> Dict[str, Any]:
+def _smith_waterman_local_fallback(q: str, t: str, *, match: int = 2, mismatch: int = -1, gap: int = -2) -> Dict[str, Any]:
     """
     Classic Smith–Waterman local alignment (O(n*m)).
     Returns dict with:
@@ -322,6 +329,62 @@ def _smith_waterman_local(q: str, t: str, *, match: int = 2, mismatch: int = -1,
     }
 
 
+def _smith_waterman_local(q: str, t: str, *, match: int = 2, mismatch: int = -1, gap: int = -2) -> Dict[str, Any]:
+    """
+    Smith–Waterman local alignment using Biopython when available (PairwiseAligner).
+    Falls back to the in-house implementation if Biopython is missing.
+    """
+    try:
+        from Bio.Align import PairwiseAligner
+    except Exception:
+        return _smith_waterman_local_fallback(q, t, match=match, mismatch=mismatch, gap=gap)
+
+    # Configure local alignment
+    aligner = PairwiseAligner()
+    aligner.mode = "local"
+    aligner.match_score = match
+    aligner.mismatch_score = mismatch
+    aligner.open_gap_score = gap
+    aligner.extend_gap_score = gap
+
+    alignments = aligner.align(q, t)
+    if not alignments:
+        return _smith_waterman_local_fallback(q, t, match=match, mismatch=mismatch, gap=gap)
+
+    aln = alignments[0]
+    # aln.aligned is a tuple of (query_blocks, target_blocks)
+    q_blocks, t_blocks = aln.aligned
+    if len(q_blocks) == 0 or len(t_blocks) == 0:
+        return _smith_waterman_local_fallback(q, t, match=match, mismatch=mismatch, gap=gap)
+
+    q_start = int(q_blocks[0][0])
+    q_end = int(q_blocks[-1][1])
+    t_start = int(t_blocks[0][0])
+    t_end = int(t_blocks[-1][1])
+
+    aligned_query_len = 0
+    matches = 0
+    for (qs, qe), (ts, te) in zip(q_blocks, t_blocks):
+        aligned_query_len += int(qe - qs)
+        for i in range(qe - qs):
+            aq = q[qs + i]
+            at = t[ts + i]
+            if aq == at or aq == "X" or at == "X":
+                matches += 1
+
+    return {
+        "score": int(aln.score),
+        "q_start": q_start,
+        "q_end": q_end,
+        "t_start": t_start,
+        "t_end": t_end,
+        "aligned_q": "",
+        "aligned_t": "",
+        "matches": matches,
+        "aligned_query_len": aligned_query_len,
+    }
+
+
 def _plausibility_warnings(plasmid_dna: str, strand: Strand, start_nt: int, end_nt_exclusive: int) -> List[str]:
     """
     Warnings-only checks to help catch "wrong region" calls.
@@ -381,9 +444,8 @@ def find_wt_in_plasmid(
       - "alignment": Smith–Waterman passes identity+coverage (handles indels)
       - "none": no candidate met thresholds
     """
-    # If no codon table is provided, default to the standard genetic code.
-    # This prevents downstream translation from crashing and keeps behaviour
-    # consistent between tests, CLI usage, and future web routes.
+    # if no codon table is provided, default to the standard genetic code —
+    # keeps behaviour consistent between tests, CLI usage, and web routes
     if codon_table is None:
         codon_table = CODON_TABLE
 
@@ -432,9 +494,14 @@ def find_wt_in_plasmid(
         )
 
     L = len(dna)
+    # doubling the plasmid sequence before translation exposes ORFs that cross
+    # the origin — a gene cloned near the assembly start point would otherwise
+    # be split across the boundary and missed by a linear search
     dna2 = dna + dna
     frames = translate_six_frames(dna2, codon_table=codon_table)
 
+    # expected coding sequence length in nucleotides — used to map AA
+    # match positions back to nucleotide coordinates on the original plasmid
     length_nt = len(wt) * 3
 
     # ----------------------------
@@ -497,6 +564,9 @@ def find_wt_in_plasmid(
     # ----------------------------
     # B) Fuzzy window identity (substitutions only)
     # ----------------------------
+    # fuzzy fallback handles variants with point mutations relative to WT —
+    # a 95% identity threshold allows up to ~5% substitution while still
+    # confirming the correct gene is present rather than a random sequence
     if best is None and fuzzy_fallback:
         fuzzy_best: Optional[_Candidate] = None
         for k, aa_seq in frames.items():
@@ -551,6 +621,9 @@ def find_wt_in_plasmid(
     # ----------------------------
     # C) Smith–Waterman (indels) — guarded by size
     # ----------------------------
+    # Smith-Waterman is the last resort — it handles indels that fuzzy matching
+    # cannot, but is O(n*m) in time and memory so it is guarded by size limits
+    # to prevent the server from hanging on large inputs
     if best is None:
         do_align = allow_slow_alignment or (len(wt) <= max_align_wt_len and (len(dna2) <= max_align_plasmid_len))
         if do_align:
@@ -563,9 +636,11 @@ def find_wt_in_plasmid(
                 if aligned_q_len <= 0:
                     continue
 
-                # identity: matches / aligned query residues (robust, not penalised by gaps in target)
+                # identity over aligned query residues rather than full WT length —
+                # avoids penalising a correct alignment that doesn't cover terminal regions
                 identity = sw["matches"] / aligned_q_len
-                # coverage: aligned query residues / full WT length
+                # coverage confirms that most of the WT sequence was aligned,
+                # preventing a short high-identity match from being accepted as valid
                 coverage = aligned_q_len / len(wt)
 
                 base_diag["top_alignment_candidates"].append(
@@ -698,5 +773,3 @@ def find_wt_in_plasmid(
         notes=best.notes,
         diagnostics=diagnostics,
     )
-
-print (GeneCall)

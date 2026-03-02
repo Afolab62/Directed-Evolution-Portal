@@ -63,7 +63,9 @@ export function MutationFingerprint({
   const [error, setError] = useState<string | null>(null);
 
   const selectedVariant = useMemo(
-    () => variants.find((v) => v.plasmidVariantIndex === selectedVariantIndex) ?? null,
+    () =>
+      variants.find((v) => v.plasmidVariantIndex === selectedVariantIndex) ??
+      null,
     [variants, selectedVariantIndex],
   );
 
@@ -119,14 +121,16 @@ export function MutationFingerprint({
           Mutation Fingerprint
         </CardTitle>
         <CardDescription>
-          Select a variant to view mutations mapped onto the 3D protein structure
-          (AlphaFold backbone coloured by pLDDT confidence)
+          Select a variant to view mutations mapped onto the 3D protein
+          structure (AlphaFold backbone coloured by pLDDT confidence)
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
         {/* Variant selector */}
         <div>
-          <label className="text-sm font-medium mb-2 block">Select Variant</label>
+          <label className="text-sm font-medium mb-2 block">
+            Select Variant
+          </label>
           <Select
             value={selectedVariantIndex?.toString() ?? ""}
             onValueChange={(v) => onSelectVariant(parseFloat(v))}
@@ -137,8 +141,8 @@ export function MutationFingerprint({
             <SelectContent>
               {variants.map((v, idx) => (
                 <SelectItem key={v.id} value={v.plasmidVariantIndex.toString()}>
-                  #{idx + 1} â€” Variant {v.plasmidVariantIndex} | Gen {v.generation} | Activity{" "}
-                  {(v.activityScore ?? 0).toFixed(3)}
+                  #{idx + 1} â€” Variant {v.plasmidVariantIndex} | Gen{" "}
+                  {v.generation} | Activity {(v.activityScore ?? 0).toFixed(3)}
                 </SelectItem>
               ))}
             </SelectContent>

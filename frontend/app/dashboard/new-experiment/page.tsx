@@ -92,12 +92,13 @@ export default function NewExperimentPage() {
 
       // Validate: must have at least one FASTA header line
       const lines = content.split("\n");
-      const firstNonEmpty = lines.find((l) => l.trim().length > 0)?.trim() ?? "";
+      const firstNonEmpty =
+        lines.find((l) => l.trim().length > 0)?.trim() ?? "";
       if (!firstNonEmpty.startsWith(">")) {
         toast({
           title: "Invalid file format",
           description:
-            "The file does not appear to be a FASTA file. The first line must start with \">\" (e.g. \">MyPlasmid\"). Please upload a valid .fasta or .fa file.",
+            'The file does not appear to be a FASTA file. The first line must start with ">" (e.g. ">MyPlasmid"). Please upload a valid .fasta or .fa file.',
           variant: "destructive",
         });
         // Reset the input so the same file can be re-selected after correction

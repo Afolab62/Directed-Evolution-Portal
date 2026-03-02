@@ -41,7 +41,9 @@ export default function ExperimentDetailPage() {
   const [isUploading, setIsUploading] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [justCompleted, setJustCompleted] = useState(false);
-  const [analysisBanner, setAnalysisBanner] = useState<{ message: string } | null>(null);
+  const [analysisBanner, setAnalysisBanner] = useState<{
+    message: string;
+  } | null>(null);
   const [uploadResult, setUploadResult] = useState<{
     parsed: number;
     processed: number;
@@ -78,7 +80,9 @@ export default function ExperimentDetailPage() {
               setTimeout(() => setJustCompleted(false), 5000);
               // Show persistent banner
               setAnalysisBanner({
-                message: data.experiment.analysisMessage || "Sequences analyzed successfully",
+                message:
+                  data.experiment.analysisMessage ||
+                  "Sequences analyzed successfully",
               });
               // Reload variants now that analysis is done
               loadExperiment();
@@ -578,8 +582,7 @@ export default function ExperimentDetailPage() {
                   <Button
                     onClick={handleAnalyzeSequences}
                     disabled={
-                      isAnalyzing ||
-                      experiment.analysisStatus === "analyzing"
+                      isAnalyzing || experiment.analysisStatus === "analyzing"
                     }
                     variant="outline"
                     className={

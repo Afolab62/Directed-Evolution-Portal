@@ -78,7 +78,9 @@ function AnalysisContent() {
       } catch (err) {
         console.error("Failed to load experiments:", err);
         setLoadError(
-          err instanceof Error ? err.message : "Failed to load experiments. Please refresh the page."
+          err instanceof Error
+            ? err.message
+            : "Failed to load experiments. Please refresh the page.",
         );
       } finally {
         setIsLoading(false);
@@ -118,7 +120,7 @@ function AnalysisContent() {
       } catch (err) {
         console.error("Failed to load variants:", err);
         setVariantError(
-          err instanceof Error ? err.message : "Failed to load variant data."
+          err instanceof Error ? err.message : "Failed to load variant data.",
         );
       }
     }
@@ -166,7 +168,9 @@ function AnalysisContent() {
       <Card>
         <CardContent className="py-12 text-center">
           <AlertCircle className="h-12 w-12 mx-auto text-destructive/70 mb-3" />
-          <p className="text-destructive font-medium">Failed to load experiments</p>
+          <p className="text-destructive font-medium">
+            Failed to load experiments
+          </p>
           <p className="text-muted-foreground text-sm mt-1">{loadError}</p>
         </CardContent>
       </Card>
@@ -224,7 +228,9 @@ function AnalysisContent() {
         <Card>
           <CardContent className="py-12 text-center">
             <AlertCircle className="h-12 w-12 mx-auto text-destructive/70 mb-3" />
-            <p className="text-destructive font-medium">Failed to load experiment data</p>
+            <p className="text-destructive font-medium">
+              Failed to load experiment data
+            </p>
             <p className="text-muted-foreground text-sm mt-1">{variantError}</p>
           </CardContent>
         </Card>

@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List
 
-from app.services.errors import FastaParseError, InvalidSequenceError
+from .errors import FastaParseError, InvalidSequenceError
 
 
 # =============================================================================

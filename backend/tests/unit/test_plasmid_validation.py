@@ -1,8 +1,8 @@
 from pathlib import Path
 import pytest
 
-from app.services.sequence_tools import parse_fasta_dna, parse_fasta_protein
-from app.services.plasmid_validation import find_wt_in_plasmid
+from services.sequence_tools import parse_fasta_dna, parse_fasta_protein
+from services.plasmid_validation import find_wt_in_plasmid
 
 
 def test_plasmid_validation_example_data():

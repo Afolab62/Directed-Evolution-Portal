@@ -1,4 +1,4 @@
-from app.services.plasmid_validation import find_wt_in_plasmid
+from services.plasmid_validation import find_wt_in_plasmid
 
 CODON = {
     "A": "GCT", "C": "TGT", "D": "GAT", "E": "GAA", "F": "TTT",

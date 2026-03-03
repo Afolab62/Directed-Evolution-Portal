@@ -1,4 +1,1 @@
-from .auth import auth_bp
-from .experiments import experiments_bp
-
-__all__ = ['auth_bp', 'experiments_bp']
+# Route blueprints are imported directly by run.py — no eager imports here.

@@ -1,4 +1,4 @@
-from app.services.plasmid_validation import find_wt_in_plasmid
+from services.plasmid_validation import find_wt_in_plasmid
 
 
 # Simple codon choices to construct a predictable coding sequence (no stops).

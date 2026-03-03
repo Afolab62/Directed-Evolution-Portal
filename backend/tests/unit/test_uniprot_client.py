@@ -1,4 +1,4 @@
-from app.services.uniprot_client import UniProtNotFound, fetch_uniprot_fasta
+from services.uniprot_client import UniProtNotFound, fetch_uniprot_fasta
 
 
 class DummyHTTPError(Exception):
@@ -8,7 +8,7 @@ class DummyHTTPError(Exception):
 
 def test_uniprot_not_found(monkeypatch):
     # Monkeypatch urlopen inside the module to simulate a 404.
-    import app.services.uniprot_client as uc
+    import services.uniprot_client as uc
 
     def fake_urlopen(req, timeout=10.0):
         raise uc.HTTPError(req.full_url, 404, "Not Found", hdrs=None, fp=None)

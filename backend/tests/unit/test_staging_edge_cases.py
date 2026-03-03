@@ -1,10 +1,10 @@
-from app.services.staging import stage_experiment_validate_plasmid
-from app.services.uniprot_client import UniProtError
+from services.staging import stage_experiment_validate_plasmid
+from services.uniprot_client import UniProtError
 
 
 def test_staging_handles_invalid_fasta(monkeypatch):
     # Avoid real UniProt call
-    import app.services.staging as staging
+    import services.staging as staging
 
     def fake_fetch_uniprot_fasta(_accession: str, timeout_s: float = 10.0) -> str:
         return ">x\nMTEST"
@@ -20,7 +20,7 @@ def test_staging_handles_invalid_fasta(monkeypatch):
 
 
 def test_staging_handles_uniprot_error(monkeypatch):
-    import app.services.staging as staging
+    import services.staging as staging
 
     def fake_fetch_uniprot_fasta(_accession: str, timeout_s: float = 10.0) -> str:
         raise UniProtError("Simulated UniProt failure")

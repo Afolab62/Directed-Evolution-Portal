@@ -1,4 +1,4 @@
-from app.services.staging import stage_experiment_validate_plasmid
+from services.staging import stage_experiment_validate_plasmid
 
 
 def test_staging_handles_uniprot_not_found(monkeypatch):
@@ -7,7 +7,7 @@ def test_staging_handles_uniprot_not_found(monkeypatch):
 
     We monkeypatch the UniProt fetch function so the test does not rely on network access.
     """
-    import app.services.staging as staging
+    import services.staging as staging
 
     def fake_fetch_uniprot_fasta(_accession: str, timeout_s: float = 10.0) -> str:
         raise Exception("Simulated UniProt failure (not found)")

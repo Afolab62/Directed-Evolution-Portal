@@ -1,10 +1,25 @@
-from app import create_app
+"""
+test_staging_api.py
+
+Tests the staging HTTP endpoints using a minimal Flask test app that registers
+only the staging blueprint — no database, no session setup required.
+"""
+from flask import Flask
+import routes.staging as staging_routes
+from routes.staging import staging_bp
+
+
+def _make_app():
+    """Minimal Flask app for testing — only the staging blueprint."""
+    app = Flask(__name__)
+    app.config["TESTING"] = True
+    app.config["SECRET_KEY"] = "test-secret-key"
+    app.register_blueprint(staging_bp)
+    return app
 
 
 def test_staging_api_success(monkeypatch):
     # Patch the staging call to avoid external API/network
-    import app.routes.staging as staging_routes
-
     def fake_stage(accession: str, plasmid_fasta_text: str, fetch_features: bool = True):
         return {
             "accession": accession,
@@ -16,9 +31,7 @@ def test_staging_api_success(monkeypatch):
 
     monkeypatch.setattr(staging_routes, "stage_experiment_validate_plasmid", fake_stage)
 
-    app = create_app()
-    app.config["TESTING"] = True
-    client = app.test_client()
+    client = _make_app().test_client()
 
     resp = client.post(
         "/staging/api/staging",
@@ -32,9 +45,7 @@ def test_staging_api_success(monkeypatch):
 
 
 def test_staging_api_missing_fields():
-    app = create_app()
-    app.config["TESTING"] = True
-    client = app.test_client()
+    client = _make_app().test_client()
 
     resp = client.post("/staging/api/staging", json={"accession": ""})
     assert resp.status_code == 400

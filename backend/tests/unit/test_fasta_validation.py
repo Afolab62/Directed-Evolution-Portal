@@ -1,7 +1,7 @@
 import pytest
 
-from app.services.sequence_tools import parse_fasta_dna, parse_fasta_protein
-from app.services.errors import FastaParseError, InvalidSequenceError
+from services.sequence_tools import parse_fasta_dna, parse_fasta_protein
+from services.errors import FastaParseError, InvalidSequenceError
 
 
 def test_multi_record_dna_fasta_rejected_by_default():

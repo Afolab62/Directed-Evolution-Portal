@@ -80,7 +80,7 @@ def _build_synonym_map() -> Dict[str, str]:
 
 _SYNONYM_MAP = _build_synonym_map()
 
-# Bool coercion map — matches mouli.py's coerce_types exactly
+# Bool coercion map 
 _BOOL_MAP = {
     1: True, 0: False,
     "1": True, "0": False,
@@ -93,7 +93,7 @@ _BOOL_MAP = {
 }
 
 
-# ── Row-level QC (mirrors mouli.py validate_row) ─────────────────────────────
+# ── Row-level QC ─────────────────────────────
 
 def _validate_row(row: Dict[str, Any]) -> List[str]:
     errors: List[str] = []

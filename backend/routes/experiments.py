@@ -1,4 +1,7 @@
-from flask import Blueprint, request, jsonify, session
+from flask import Blueprint, request, jsonify, session, send_file
+import io
+import matplotlib
+matplotlib.use('Agg')  # headless backend — must be set before any pyplot import
 from services.experiment_service import experiment_service
 from services.experimental_data_parser import parser
 from services.activity_calculator import activity_calculator
@@ -376,9 +379,9 @@ def upload_experimental_data(experiment_id: str):
             for mut in variant_data.get('mutations', []):
                 mutation = Mutation(
                     position=mut['position'],
-                    wild_type=mut['wild_type'],
-                    mutant=mut['mutant'],
-                    mutation_type=mut['type'],
+                    wild_type=mut['wt_aa'],
+                    mutant=mut['mut_aa'],
+                    mutation_type=mut.get('mutation_type', 'non-synonymous'),
                     generation_introduced=variant_data['generation']  # Simplified
                 )
                 variant.mutations.append(mutation)
@@ -498,7 +501,13 @@ def get_top_performers(experiment_id: str):
         ).order_by(
             VariantData.activity_score.desc()
         ).limit(limit).all()
-        
+
+        # ── Debug: log mutation counts so we can verify DB state ──────────────
+        for v in variants:
+            mut_list = v.mutations if include_mutations else []
+            print(f"[TOP] variant pvi={v.plasmid_variant_index} gen={v.generation} "
+                  f"mutations={len(mut_list)} activity={v.activity_score:.3f}")
+
         return jsonify({
             'success': True,
             'topPerformers': [v.to_dict(include_sequences=True, include_mutations=include_mutations) for v in variants]
@@ -919,7 +928,7 @@ def _run_analysis_background(app, exp_id, wt_protein_seq: str, plasmid_seq: str)
 
                 this_muts: dict = {}
                 for mut in result.get('mutations', []):
-                    key = (mut['position'], mut['wild_type'], mut['mutant'])
+                    key = (mut['position'], mut['wt_aa'], mut['mut_aa'])
                     if key in parent_muts:
                         # Inherited — keep the generation it was first introduced
                         this_muts[key] = parent_muts[key]
@@ -928,17 +937,12 @@ def _run_analysis_background(app, exp_id, wt_protein_seq: str, plasmid_seq: str)
                         this_muts[key] = v.generation
                 idx_to_mutations[v.plasmid_variant_index] = this_muts
 
-            # Bulk-delete all existing mutations in one round-trip
-            if variant_ids:
-                db.query(Mutation).filter(
-                    Mutation.variant_id.in_(variant_ids)
-                ).delete(synchronize_session=False)
-                db.commit()
-                print(f"[BG] Cleared existing mutations for {len(variant_ids)} variants")
-
-            # Update protein sequences and accumulate new Mutation objects
+            # ── Build new Mutation objects and protein updates (no DB writes yet) ────
+            # ALL computation completes before ANY destructive DB operation.
+            # This means a server restart or exception during analysis leaves the
+            # existing mutations intact — the old delete-first approach wiped them.
             new_mutations = []
-            updated_count = 0
+            protein_updates = {}   # variant_id -> new protein_sequence string
             BATCH_SIZE = 200
 
             for result in analyzed:
@@ -946,31 +950,51 @@ def _run_analysis_background(app, exp_id, wt_protein_seq: str, plasmid_seq: str)
                 if not variant:
                     continue
 
-                variant.protein_sequence = result.get('protein_sequence')
-                updated_count += 1
+                protein_updates[result['id']] = result.get('protein_sequence')
 
                 gen_map = idx_to_mutations.get(variant.plasmid_variant_index, {})
                 for mut in result.get('mutations', []):
-                    key = (mut['position'], mut['wild_type'], mut['mutant'])
+                    key = (mut['position'], mut['wt_aa'], mut['mut_aa'])
                     gen_introduced = gen_map.get(key, variant.generation)
                     new_mutations.append(Mutation(
                         variant_id=variant.id,
                         position=mut['position'],
-                        wild_type=mut['wild_type'],
-                        mutant=mut['mutant'],
+                        wild_type=mut['wt_aa'],
+                        mutant=mut['mut_aa'],
                         wt_codon=mut.get('wt_codon'),
                         mut_codon=mut.get('mut_codon'),
                         mut_aa=mut.get('mut_aa'),
-                        mutation_type=mut.get('type', 'non-synonymous'),
+                        mutation_type=mut.get('mutation_type', 'non-synonymous'),
                         generation_introduced=gen_introduced
                     ))
 
-                # Flush a batch of protein-sequence updates periodically
-                if updated_count % BATCH_SIZE == 0:
-                    db.commit()
-                    print(f"[BG] Flushed protein sequences: {updated_count}/{len(analyzed)}")
+            print(f"[BG] Built {len(new_mutations)} mutations for {len(protein_updates)} variants — writing to DB...")
+
+            # ── Atomic swap: delete old mutations then insert new ones ─────────
+            # Both steps are in the same transaction so a crash leaves the DB in
+            # a consistent state (either fully old or fully new data).
+            updated_count = 0
+            if variant_ids:
+                deleted = db.query(Mutation).filter(
+                    Mutation.variant_id.in_(variant_ids)
+                ).delete(synchronize_session=False)
+                print(f"[BG] Deleted {deleted} old mutations")
+
+            for result_id, new_protein in protein_updates.items():
+                variant = variant_dict.get(result_id)
+                if variant:
+                    variant.protein_sequence = new_protein
+                    updated_count += 1
+                    # Flush protein-sequence updates in batches to keep memory low
+                    if updated_count % BATCH_SIZE == 0:
+                        db.flush()
+                        print(f"[BG] Flushed protein sequences: {updated_count}/{len(protein_updates)}")
+
             if new_mutations:
-                db.bulk_save_objects(new_mutations)
+                # add_all() is used instead of bulk_save_objects() — it respects
+                # the current transaction and fires ORM events correctly.
+                db.add_all(new_mutations)
+                print(f"[BG] Staged {len(new_mutations)} mutations for insert")
 
             db.commit()
             print(f"[BG] Database update complete: {updated_count} variants, {len(new_mutations)} mutations")
@@ -981,6 +1005,11 @@ def _run_analysis_background(app, exp_id, wt_protein_seq: str, plasmid_seq: str)
             traceback.print_exc()
             db.rollback()
             _set_analysis_status(exp_id, 'failed', f'Analysis failed: {str(e)}')
+        finally:
+            # Always release the scoped session for this thread back to the pool.
+            # Without this, the background-thread session stays in the registry
+            # and holds a DB connection open indefinitely.
+            db.remove()
 
 
 @experiments_bp.route('/<experiment_id>/analyze-sequences', methods=['POST'])
@@ -1032,3 +1061,114 @@ def analyze_sequences(experiment_id: str):
         traceback.print_exc()
         db.rollback()
         return jsonify({'success': False, 'error': f'Failed to start analysis: {str(e)}'}), 500
+
+
+@experiments_bp.route('/<experiment_id>/plots/activity-distribution', methods=['GET'])
+def plot_activity_distribution(experiment_id: str):
+    """Return a PNG of the activity score distribution violin plot.
+    Runs the original matplotlib/seaborn code from activity_score_per_gen.py
+    server-side and streams the image back.
+    """
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({'success': False, 'error': 'Unauthorized'}), 401
+
+    try:
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        experiment = experiment_service.get_experiment_by_id(experiment_id, user_id)
+        if not experiment:
+            return jsonify({'success': False, 'error': 'Experiment not found'}), 404
+
+        exp_uuid = uuid.UUID(experiment_id) if isinstance(experiment_id, str) else experiment_id
+        variants = (
+            db.query(VariantData)
+            .filter(
+                VariantData.experiment_id == exp_uuid,
+                VariantData.qc_status == 'passed',
+                VariantData.activity_score.isnot(None),
+            )
+            .all()
+        )
+
+        if not variants:
+            return jsonify({'success': False, 'error': 'No QC-passed variants with activity scores'}), 404
+
+        df = pd.DataFrame([
+            {
+                'Directed_Evolution_Generation': v.generation,
+                'activity_score': float(v.activity_score),
+            }
+            for v in variants
+        ])
+        df = df.dropna(subset=['Directed_Evolution_Generation', 'activity_score'])
+
+        # ── original activity_score_per_gen.py plot logic ─────────────────────
+        gens = sorted(df['Directed_Evolution_Generation'].unique())
+
+        # Filter out generations with fewer than 2 points (violinplot requires ≥2)
+        data = [
+            df[df['Directed_Evolution_Generation'] == g]['activity_score'].values.astype(float)
+            for g in gens
+            if len(df[df['Directed_Evolution_Generation'] == g]) >= 2
+        ]
+        gens = [
+            g for g in gens
+            if len(df[df['Directed_Evolution_Generation'] == g]) >= 2
+        ]
+
+        if not data:
+            return jsonify({'success': False, 'error': 'Not enough data points per generation to draw violin plots (need ≥2 per generation)'}), 404
+
+        fig, ax = plt.subplots(figsize=(10, 7))
+        fig.patch.set_facecolor('#0f172a')   # dark background to match portal
+        ax.set_facecolor('#1e293b')
+
+        violins = ax.violinplot(data, widths=0.9, points=200)
+
+        for pc in violins['bodies']:
+            pc.set_facecolor('#add8e6')
+            pc.set_edgecolor('#5aa0c8')
+            pc.set_alpha(0.8)
+        for part in ('cbars', 'cmins', 'cmaxes'):
+            if part in violins:
+                violins[part].set_visible(False)
+
+        for i, v in enumerate(data, start=1):
+            vmin = np.min(v)
+            vmax = np.max(v)
+            mean = np.mean(v)
+            median = np.median(v)
+
+            ax.vlines(i, vmin, vmax, linewidth=2, colors='#1e40af')
+            ax.hlines(vmin,   i - 0.12, i + 0.12, linewidth=2, colors='#1e40af')
+            ax.hlines(vmax,   i - 0.12, i + 0.12, linewidth=2, colors='#1e40af')
+            ax.hlines(mean,   i - 0.18, i + 0.18, linewidth=3, colors='#1e40af')
+            ax.hlines(median, i - 0.18, i + 0.18, linewidth=3, colors='#1e40af')
+
+        ax.set_xticks(range(1, len(gens) + 1))
+        ax.set_xticklabels([f'Gen {int(g)}' for g in gens], color='#94a3b8')
+        ax.tick_params(colors='#94a3b8')
+        ax.set_xlabel('Generation', color='#94a3b8')
+        ax.set_ylabel('Activity Score', color='#94a3b8')
+        ax.set_title('Activity Score Distribution by Generation', color='#e2e8f0')
+        for spine in ax.spines.values():
+            spine.set_color('#334155')
+        ax.grid(True, color='#334155', linewidth=0.5)
+
+        plt.tight_layout()
+        # ───────────────────────────────────────────────────────────────────────
+
+        buf = io.BytesIO()
+        fig.savefig(buf, format='png', dpi=150, bbox_inches='tight',
+                    facecolor=fig.get_facecolor())
+        plt.close(fig)
+        buf.seek(0)
+
+        return send_file(buf, mimetype='image/png')
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500

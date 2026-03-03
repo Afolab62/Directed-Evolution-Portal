@@ -62,6 +62,94 @@ def _reverse_complement(seq: str) -> str:
     return ''.join(complement.get(b, b) for b in reversed(seq))
 
 
+def _needleman_wunsch(seq_a: str, seq_b: str,
+                      match: int = 2, mismatch: int = -1, gap: int = -2) -> Tuple[str, str]:
+    """
+    Needleman-Wunsch global alignment of two protein sequences.
+    Returns (aligned_seq_a, aligned_seq_b) with '-' gap characters.
+    Used to compute alignment-aware positions for mutations near indels.
+    """
+    n, m = len(seq_a), len(seq_b)
+    score = [[0] * (m + 1) for _ in range(n + 1)]
+    trace = [[0] * (m + 1) for _ in range(n + 1)]  # 0=diag 1=up 2=left
+
+    for i in range(1, n + 1):
+        score[i][0] = i * gap
+        trace[i][0] = 1
+    for j in range(1, m + 1):
+        score[0][j] = j * gap
+        trace[0][j] = 2
+
+    for i in range(1, n + 1):
+        a = seq_a[i - 1]
+        for j in range(1, m + 1):
+            b = seq_b[j - 1]
+            s_diag = score[i-1][j-1] + (match if a == b else mismatch)
+            s_up   = score[i-1][j] + gap
+            s_left = score[i][j-1] + gap
+            best = s_diag; t = 0
+            if s_up   > best: best = s_up;   t = 1
+            if s_left > best: best = s_left; t = 2
+            score[i][j] = best
+            trace[i][j] = t
+
+    aligned_a: List[str] = []
+    aligned_b: List[str] = []
+    i, j = n, m
+    while i > 0 or j > 0:
+        t = trace[i][j] if i >= 0 and j >= 0 else 0
+        if i > 0 and j > 0 and t == 0:
+            aligned_a.append(seq_a[i-1]); aligned_b.append(seq_b[j-1]); i -= 1; j -= 1
+        elif i > 0 and (j == 0 or t == 1):
+            aligned_a.append(seq_a[i-1]); aligned_b.append('-'); i -= 1
+        else:
+            aligned_a.append('-'); aligned_b.append(seq_b[j-1]); j -= 1
+    aligned_a.reverse(); aligned_b.reverse()
+    return ''.join(aligned_a), ''.join(aligned_b)
+
+
+def _build_wt_position_map(aligned_wt: str, aligned_var: str) -> Dict[int, int]:
+    """Map each 1-based WT residue position to its alignment column index."""
+    wt_map: Dict[int, int] = {}
+    wt_pos = 0
+    for aln_pos, (wa, _) in enumerate(zip(aligned_wt, aligned_var), start=1):
+        if wa != '-':
+            wt_pos += 1
+            wt_map[wt_pos] = aln_pos
+    return wt_map
+
+
+def _estimate_rotation_offset(wt_plasmid: str, variant_plasmid: str) -> Optional[int]:
+    """
+    Estimate the circular rotation offset (in nt) between WT and a variant
+    plasmid assembly.  High-throughput sequencing assemblers may produce
+    assemblies that start at a different position on the circle, shifting the
+    gene coordinates by a fixed amount.
+
+    Short anchors from the WT are located in the variant; the most-voted
+    offset is returned.  Returns None if no consistent offset is found.
+    """
+    wt  = _clean(wt_plasmid)
+    var = _clean(variant_plasmid)
+    length = len(wt)
+    anchor_positions = list(range(0, length, 350))
+
+    for k in (150, 120, 100, 80, 60, 40):
+        votes: Dict[int, int] = {}
+        for pos in anchor_positions:
+            if pos + k > length:
+                continue
+            anchor = wt[pos: pos + k]
+            idx = var.find(anchor)
+            while idx >= 0:
+                offset = (pos - idx) % length
+                votes[offset] = votes.get(offset, 0) + 1
+                idx = var.find(anchor, idx + 1)
+        if votes:
+            return max(votes.items(), key=lambda kv: (kv[1], -kv[0]))[0]
+    return None
+
+
 def _smith_waterman(seq1: str, seq2: str, match=2, mismatch=-1, gap=-1) -> Tuple[int, int, int]:
     """
     Smith-Waterman local alignment.
@@ -155,9 +243,13 @@ def extract_gene(plasmid_seq: str, gene_start: int, gene_length: int) -> str:
 
 def identify_mutations(wt_gene_dna: str, var_gene_dna: str) -> List[Dict]:
     """
-    Codon-by-codon comparison.  Returns list of mutation dicts with keys that
-    match what experiments.py expects when writing to the DB:
-        position, wild_type, mutant, wt_codon, mut_codon, mut_aa, type
+    Codon-by-codon comparison.  Returns list of mutation dicts with keys:
+        position, wt_aa, mut_aa, wt_codon, mut_codon, mutation_type, aa_change
+
+    Field names are standardised to match mutation_analysis.py so that
+    experiments.py can consume results from either code path without branching.
+    aligned_position is added downstream by analyze_variant_batch() after the
+    global protein alignment step.
     """
     mutations = []
 
@@ -171,27 +263,28 @@ def identify_mutations(wt_gene_dna: str, var_gene_dna: str) -> List[Dict]:
 
     for i in range(n_codons):
         s = i * 3
-        wt_codon = wt_gene_dna[s:s+3]
+        wt_codon  = wt_gene_dna[s:s+3]
         var_codon = var_gene_dna[s:s+3]
 
         if wt_codon == var_codon:
             continue
 
-        wt_aa = GENETIC_CODE.get(wt_codon, 'X')
+        wt_aa  = GENETIC_CODE.get(wt_codon,  'X')
         var_aa = GENETIC_CODE.get(var_codon, 'X')
 
-        # Skip if either is a stop codon mid-sequence (shouldn't happen but guard anyway)
+        # Skip stop codons mid-sequence
         if wt_aa == '*' or var_aa == '*':
             continue
 
+        pos = i + 1  # 1-based
         mutations.append({
-            'position': i + 1,          # 1-based
-            'wild_type': wt_aa,
-            'mutant': var_aa,
-            'wt_codon': wt_codon,
-            'mut_codon': var_codon,
-            'mut_aa': var_aa,
-            'type': 'synonymous' if wt_aa == var_aa else 'non-synonymous',
+            'position':      pos,
+            'wt_aa':         wt_aa,
+            'mut_aa':        var_aa,
+            'wt_codon':      wt_codon,
+            'mut_codon':     var_codon,
+            'mutation_type': 'synonymous' if wt_aa == var_aa else 'non-synonymous',
+            'aa_change':     f'{wt_aa}{pos}{var_aa}',
         })
 
     return mutations
@@ -307,16 +400,37 @@ class SequenceAnalyzer:
             variant_copy = variant.copy()
 
             try:
+                # Estimate circular rotation between WT and this variant assembly.
+                # Variant plasmids may be sequenced/assembled starting at a different
+                # position on the circle, shifting gene coordinates by a fixed offset.
+                rotation = _estimate_rotation_offset(
+                    wt_plasmid_sequence, variant['assembled_dna_sequence']
+                )
+                adj_start = (
+                    (gene_start - rotation) % len(_clean(wt_plasmid_sequence))
+                    if rotation is not None else gene_start
+                )
+
                 var_gene_dna = extract_gene(
-                    variant['assembled_dna_sequence'], gene_start, gene_length
+                    variant['assembled_dna_sequence'], adj_start, gene_length
                 )
                 var_protein = _translate(var_gene_dna)
 
                 mutations = identify_mutations(wt_gene_dna, var_gene_dna)
 
+                # Add aligned_position via Needleman-Wunsch global alignment.
+                # When indels exist near or before a mutation site, simple 1-based
+                # codon positions can be off by the indel count.  The aligned
+                # position is used by the 3D fingerprint to correctly map mutations
+                # onto AlphaFold structure residues.
+                aligned_wt, aligned_var = _needleman_wunsch(self.wt_protein, var_protein)
+                wt_pos_map = _build_wt_position_map(aligned_wt, aligned_var)
+                for m in mutations:
+                    m['aligned_position'] = wt_pos_map.get(m['position'], m['position'])
+
                 # Debug first 3 variants
                 if i < 3:
-                    n_syn = sum(1 for m in mutations if m['type'] == 'synonymous')
+                    n_syn = sum(1 for m in mutations if m['mutation_type'] == 'synonymous')
                     n_ns = len(mutations) - n_syn
                     wt_len = len(self.wt_protein)
                     v_len = len(var_protein)
@@ -342,11 +456,11 @@ class SequenceAnalyzer:
 
         # ── Step 3: summary ───────────────────────────────────────────────────
         total_syn = sum(
-            sum(1 for m in v['mutations'] if m['type'] == 'synonymous')
+            sum(1 for m in v['mutations'] if m['mutation_type'] == 'synonymous')
             for v in results
         )
         total_ns = sum(
-            sum(1 for m in v['mutations'] if m['type'] == 'non-synonymous')
+            sum(1 for m in v['mutations'] if m['mutation_type'] == 'non-synonymous')
             for v in results
         )
         avg_ns = total_ns / len(results) if results else 0

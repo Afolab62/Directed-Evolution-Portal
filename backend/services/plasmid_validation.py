@@ -364,6 +364,7 @@ def find_wt_in_plasmid(
     min_wt_len: int = 30,
     fuzzy_fallback: bool = True,
     min_identity: float = 0.95,
+    max_fuzzy_plasmid_len: int = 100_000,
     align_min_identity: float = 0.90,
     align_min_coverage: float = 0.95,
     codon_table: Optional[Dict[str, str]] = None,
@@ -394,6 +395,7 @@ def find_wt_in_plasmid(
         "params": {
             "min_wt_len": min_wt_len,
             "min_identity": min_identity,
+            "max_fuzzy_plasmid_len": max_fuzzy_plasmid_len,
             "align_min_identity": align_min_identity,
             "align_min_coverage": align_min_coverage,
             "max_align_wt_len": max_align_wt_len,
@@ -499,52 +501,66 @@ def find_wt_in_plasmid(
     # ----------------------------
     if best is None and fuzzy_fallback:
         fuzzy_best: Optional[_Candidate] = None
-        for k, aa_seq in frames.items():
-            strand, frame = _frame_key_to_strand_frame(k)
-            best_id, best_i = _best_fuzzy_identity(aa_seq, wt)
-            base_diag["top_fuzzy_candidates"].append(
-                {
-                    "frame": k,
-                    "best_identity": round(best_id, 6),
-                    "passed": bool(best_id >= min_identity),
-                    "used_x_wildcard": ("X" in aa_seq) or ("X" in wt),
-                }
-            )
-            if best_i == -1:
-                continue
-            if best_id >= min_identity:
-                if strand == "+":
-                    nt_start2 = frame + best_i * 3
-                    nt_end2 = nt_start2 + length_nt
-                    start_nt, end_nt_exclusive, wraps_origin = _map_plus_nt_coords(L, nt_start2, length_nt)
-                else:
-                    nt_start_rev2 = frame + best_i * 3
-                    start_nt, end_nt_exclusive, wraps_origin, nt_start2 = _map_minus_nt_coords(L, len(dna2), nt_start_rev2, length_nt)
-                    nt_end2 = nt_start2 + length_nt
-
-                score = _orf_context_score(dna, strand, start_nt, end_nt_exclusive)
-
-                cand = _Candidate(
-                    strand=strand,
-                    frame=frame,
-                    frame_key=k,
-                    aa_index=best_i,
-                    nt_start2=nt_start2,
-                    nt_end2=nt_end2,
-                    wraps_origin=wraps_origin,
-                    score=score,
-                    match_type="fuzzy",
-                    identity=best_id,
-                    coverage=1.0,
-                    notes=f"Fuzzy match accepted in frame {strand}{frame}: identity={best_id:.3f} >= {min_identity:.3f}. start2={nt_start2}, end2={nt_end2}.",
+        # Large-plasmid fast-path: the O(L×M) sliding-window scan is
+        # impractical beyond max_fuzzy_plasmid_len.  Skip it and fall through
+        # to Smith–Waterman (guarded separately by its own size limits).
+        if len(dna) > max_fuzzy_plasmid_len:
+            base_diag["fuzzy_skipped"] = {
+                "reason": (
+                    f"Plasmid ({len(dna):,} nt) exceeds max_fuzzy_plasmid_len "
+                    f"({max_fuzzy_plasmid_len:,} nt).  Fuzzy O(L×M) window "
+                    "scan skipped to avoid timeout; proceeding to alignment."
+                ),
+                "plasmid_len": len(dna),
+                "max_fuzzy_plasmid_len": max_fuzzy_plasmid_len,
+            }
+        else:
+            for k, aa_seq in frames.items():
+                strand, frame = _frame_key_to_strand_frame(k)
+                best_id, best_i = _best_fuzzy_identity(aa_seq, wt)
+                base_diag["top_fuzzy_candidates"].append(
+                    {
+                        "frame": k,
+                        "best_identity": round(best_id, 6),
+                        "passed": bool(best_id >= min_identity),
+                        "used_x_wildcard": ("X" in aa_seq) or ("X" in wt),
+                    }
                 )
-                if (fuzzy_best is None) or (cand.identity > fuzzy_best.identity) or (cand.identity == fuzzy_best.identity and cand.score > fuzzy_best.score):
-                    fuzzy_best = cand
+                if best_i == -1:
+                    continue
+                if best_id >= min_identity:
+                    if strand == "+":
+                        nt_start2 = frame + best_i * 3
+                        nt_end2 = nt_start2 + length_nt
+                        start_nt, end_nt_exclusive, wraps_origin = _map_plus_nt_coords(L, nt_start2, length_nt)
+                    else:
+                        nt_start_rev2 = frame + best_i * 3
+                        start_nt, end_nt_exclusive, wraps_origin, nt_start2 = _map_minus_nt_coords(L, len(dna2), nt_start_rev2, length_nt)
+                        nt_end2 = nt_start2 + length_nt
 
-        # keep only a few diagnostic summaries
-        base_diag["top_fuzzy_candidates"] = sorted(
-            base_diag["top_fuzzy_candidates"], key=lambda d: d["best_identity"], reverse=True
-        )[:3]
+                    score = _orf_context_score(dna, strand, start_nt, end_nt_exclusive)
+
+                    cand = _Candidate(
+                        strand=strand,
+                        frame=frame,
+                        frame_key=k,
+                        aa_index=best_i,
+                        nt_start2=nt_start2,
+                        nt_end2=nt_end2,
+                        wraps_origin=wraps_origin,
+                        score=score,
+                        match_type="fuzzy",
+                        identity=best_id,
+                        coverage=1.0,
+                        notes=f"Fuzzy match accepted in frame {strand}{frame}: identity={best_id:.3f} >= {min_identity:.3f}. start2={nt_start2}, end2={nt_end2}.",
+                    )
+                    if (fuzzy_best is None) or (cand.identity > fuzzy_best.identity) or (cand.identity == fuzzy_best.identity and cand.score > fuzzy_best.score):
+                        fuzzy_best = cand
+
+            # keep only a few diagnostic summaries
+            base_diag["top_fuzzy_candidates"] = sorted(
+                base_diag["top_fuzzy_candidates"], key=lambda d: d["best_identity"], reverse=True
+            )[:3]
 
         best = fuzzy_best
 

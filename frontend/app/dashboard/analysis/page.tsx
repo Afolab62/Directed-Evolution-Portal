@@ -30,19 +30,31 @@ import Loading from "./loading";
 // recharts from being parsed as part of the main page bundle, cutting the
 // first-compile time from ~20 s down to ~3 s.
 const TopPerformersTable = dynamic(
-  () => import("@/components/analysis/top-performers-table").then((m) => ({ default: m.TopPerformersTable })),
+  () =>
+    import("@/components/analysis/top-performers-table").then((m) => ({
+      default: m.TopPerformersTable,
+    })),
   { ssr: false, loading: () => <Skeleton className="h-48 w-full" /> },
 );
 const ActivityDistributionChart = dynamic(
-  () => import("@/components/analysis/activity-distribution-chart").then((m) => ({ default: m.ActivityDistributionChart })),
+  () =>
+    import("@/components/analysis/activity-distribution-chart").then((m) => ({
+      default: m.ActivityDistributionChart,
+    })),
   { ssr: false, loading: () => <Skeleton className="h-64 w-full" /> },
 );
 const MutationFingerprint = dynamic(
-  () => import("@/components/analysis/mutation-fingerprint").then((m) => ({ default: m.MutationFingerprint })),
+  () =>
+    import("@/components/analysis/mutation-fingerprint").then((m) => ({
+      default: m.MutationFingerprint,
+    })),
   { ssr: false, loading: () => <Skeleton className="h-96 w-full" /> },
 );
 const ActivityLandscape = dynamic(
-  () => import("@/components/analysis/activity-landscape").then((m) => ({ default: m.ActivityLandscape })),
+  () =>
+    import("@/components/analysis/activity-landscape").then((m) => ({
+      default: m.ActivityLandscape,
+    })),
   { ssr: false, loading: () => <Skeleton className="h-96 w-full" /> },
 );
 
@@ -63,6 +75,7 @@ function AnalysisContent() {
   const [selectedVariantIndex, setSelectedVariantIndex] = useState<
     number | null
   >(null);
+  const [activeTab, setActiveTab] = useState("overview");
   const [loadError, setLoadError] = useState<string | null>(null);
   const [variantError, setVariantError] = useState<string | null>(null);
 
@@ -119,6 +132,8 @@ function AnalysisContent() {
         return;
       }
       setVariantError(null);
+      setSelectedVariantIndex(null);
+      setActiveTab("overview");
 
       try {
         const res = await fetch(
@@ -206,7 +221,7 @@ function AnalysisContent() {
             Analysis Dashboard
           </h1>
           <p className="text-muted-foreground mt-1">
-            Visualize and analyze your directed evolution experiments
+            Visualise and analyse your directed evolution experiments
           </p>
         </div>
 
@@ -309,7 +324,7 @@ function AnalysisContent() {
           </div>
 
           {/* Visualizations */}
-          <Tabs defaultValue="overview">
+          <Tabs value={activeTab} onValueChange={setActiveTab}>
             <TabsList>
               <TabsTrigger value="overview">Overview</TabsTrigger>
               <TabsTrigger value="performers">Top Performers</TabsTrigger>
@@ -318,7 +333,10 @@ function AnalysisContent() {
             </TabsList>
 
             <TabsContent value="overview" className="space-y-6 mt-6">
-              <ActivityDistributionChart variants={passedVariants} experimentId={selectedExpId} />
+              <ActivityDistributionChart
+                variants={passedVariants}
+                experimentId={selectedExpId}
+              />
 
               <Card>
                 <CardHeader>
@@ -333,7 +351,10 @@ function AnalysisContent() {
                 <CardContent>
                   <TopPerformersTable
                     variants={topPerformers}
-                    onSelectVariant={(idx) => setSelectedVariantIndex(idx)}
+                    onSelectVariant={(idx) => {
+                      setSelectedVariantIndex(idx);
+                      setActiveTab("mutations");
+                    }}
                     selectedVariant={selectedVariantIndex}
                     isLoading={isLoadingTopPerformers}
                   />
@@ -353,7 +374,10 @@ function AnalysisContent() {
                 <CardContent>
                   <TopPerformersTable
                     variants={topPerformers}
-                    onSelectVariant={(idx) => setSelectedVariantIndex(idx)}
+                    onSelectVariant={(idx) => {
+                      setSelectedVariantIndex(idx);
+                      setActiveTab("mutations");
+                    }}
                     selectedVariant={selectedVariantIndex}
                     isLoading={isLoadingTopPerformers}
                     detailed

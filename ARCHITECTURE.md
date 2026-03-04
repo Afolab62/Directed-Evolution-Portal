@@ -261,16 +261,16 @@ const ActivityDistributionChart = dynamic(
 
 ## 7. Key Design Decisions
 
-| Decision | Rationale |
-|---|---|
-| Flask over FastAPI | Team familiarity; SQLAlchemy integration simpler |
-| Scoped session (`db.remove()` in finally) | Required when SQLAlchemy scoped_session is used in background daemon threads — prevents session leaks |
-| Compute-first, write-second for mutation analysis | Prevents DB leaving mutations table empty if Flask hot-reloader restarts the server mid-analysis |
-| Server-side matplotlib PNG for violin plot | Faithful replication of `activity_score_per_gen.py` without re-implementing KDE in JS |
-| Lazy imports in `landscape_service.py` | `torch`, `esm`, `umap` are optional heavy dependencies; service degrades gracefully to one-hot encoding if unavailable |
-| Needleman-Wunsch alignment in sequence_analyzer | WT and variant sequences can differ in length due to indels; simple positional diff would mis-call all downstream residues |
-| Rotation offset estimation | Plasmid sequences are circular; PCR can amplify a differently-rotated read, shifting every position by a fixed offset |
-| `dynamic()` imports on analysis page | Reduces initial Next.js compile from ~20 s to ~3 s by splitting Plotly out of the main bundle |
+| Decision                                          | Rationale                                                                                                                  |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Flask over FastAPI                                | Team familiarity; SQLAlchemy integration simpler                                                                           |
+| Scoped session (`db.remove()` in finally)         | Required when SQLAlchemy scoped_session is used in background daemon threads — prevents session leaks                      |
+| Compute-first, write-second for mutation analysis | Prevents DB leaving mutations table empty if Flask hot-reloader restarts the server mid-analysis                           |
+| Server-side matplotlib PNG for violin plot        | Faithful replication of `activity_score_per_gen.py` without re-implementing KDE in JS                                      |
+| Lazy imports in `landscape_service.py`            | `torch`, `esm`, `umap` are optional heavy dependencies; service degrades gracefully to one-hot encoding if unavailable     |
+| Needleman-Wunsch alignment in sequence_analyzer   | WT and variant sequences can differ in length due to indels; simple positional diff would mis-call all downstream residues |
+| Rotation offset estimation                        | Plasmid sequences are circular; PCR can amplify a differently-rotated read, shifting every position by a fixed offset      |
+| `dynamic()` imports on analysis page              | Reduces initial Next.js compile from ~20 s to ~3 s by splitting Plotly out of the main bundle                              |
 
 ---
 
@@ -278,16 +278,16 @@ const ActivityDistributionChart = dynamic(
 
 ### backend/.env
 
-| Variable | Description |
-|---|---|
-| `SECRET_KEY` | Flask session signing key |
+| Variable       | Description                                                    |
+| -------------- | -------------------------------------------------------------- |
+| `SECRET_KEY`   | Flask session signing key                                      |
 | `DATABASE_URL` | Neon PostgreSQL connection string (include `?sslmode=require`) |
-| `FRONTEND_URL` | Allowed CORS origin (default `http://localhost:3000`) |
+| `FRONTEND_URL` | Allowed CORS origin (default `http://localhost:3000`)          |
 
 ### frontend/.env.local
 
-| Variable | Description |
-|---|---|
+| Variable                  | Description                                          |
+| ------------------------- | ---------------------------------------------------- |
 | `NEXT_PUBLIC_BACKEND_URL` | Flask API base URL (default `http://localhost:8000`) |
 
 ---
@@ -326,31 +326,31 @@ npm run dev
 
 ### Backend (Python)
 
-| Package | Purpose |
-|---|---|
-| Flask 3.0 | HTTP framework |
-| SQLAlchemy ≥2.0 | ORM + scoped session |
-| psycopg3 | PostgreSQL driver |
-| Flask-Session | Server-side session storage |
-| Flask-CORS | CORS headers |
-| bcrypt | Password hashing |
-| numpy | Numerical operations (alignment, stats) |
-| pandas | DataFrame for plot data |
-| matplotlib ≥3.8 | Server-side violin plot generation |
-| seaborn ≥0.13 | (available; activity_score_distribution_plot.py) |
-| scipy | Statistical functions |
-| scikit-learn | PCA fallback in landscape service |
-| requests | UniProt API client |
-| plotly | (optional, landscape Plotly JSON) |
+| Package         | Purpose                                          |
+| --------------- | ------------------------------------------------ |
+| Flask 3.0       | HTTP framework                                   |
+| SQLAlchemy ≥2.0 | ORM + scoped session                             |
+| psycopg3        | PostgreSQL driver                                |
+| Flask-Session   | Server-side session storage                      |
+| Flask-CORS      | CORS headers                                     |
+| bcrypt          | Password hashing                                 |
+| numpy           | Numerical operations (alignment, stats)          |
+| pandas          | DataFrame for plot data                          |
+| matplotlib ≥3.8 | Server-side violin plot generation               |
+| seaborn ≥0.13   | (available; activity_score_distribution_plot.py) |
+| scipy           | Statistical functions                            |
+| scikit-learn    | PCA fallback in landscape service                |
+| requests        | UniProt API client                               |
+| plotly          | (optional, landscape Plotly JSON)                |
 
 ### Frontend (Node)
 
-| Package | Purpose |
-|---|---|
-| Next.js 14 | React framework (App Router) |
-| TypeScript | Type safety |
-| Tailwind CSS | Utility styling |
-| shadcn/ui + Radix UI | Accessible component primitives |
-| react-plotly.js | Interactive charts (fingerprint, landscape) |
-| next-themes | Dark mode |
-| pnpm | Package manager |
+| Package              | Purpose                                     |
+| -------------------- | ------------------------------------------- |
+| Next.js 14           | React framework (App Router)                |
+| TypeScript           | Type safety                                 |
+| Tailwind CSS         | Utility styling                             |
+| shadcn/ui + Radix UI | Accessible component primitives             |
+| react-plotly.js      | Interactive charts (fingerprint, landscape) |
+| next-themes          | Dark mode                                   |
+| pnpm                 | Package manager                             |

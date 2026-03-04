@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify, session, send_file
+from flask import Blueprint, request, jsonify, session, send_file, Response
 import io
 import matplotlib
 matplotlib.use('Agg')  # headless backend — must be set before any pyplot import
@@ -6,7 +6,7 @@ from services.experiment_service import experiment_service
 from services.experimental_data_parser import parser
 from services.activity_calculator import activity_calculator
 from services.sequence_analyzer import sequence_analyzer
-from services.fingerprint_plot import resolve_structure, build_3d_fingerprint
+from services.fingerprint_plot import resolve_structure, build_3d_fingerprint, build_linear_fingerprint
 from services.uniprot_client import fetch_uniprot_features_json
 from models.experiment import Experiment, VariantData, Mutation, safe_float
 from database import db
@@ -761,7 +761,7 @@ def get_mutation_fingerprint_3d(experiment_id: str, variant_id: str):
             except Exception:
                 pass
 
-        # ── 8. Build Plotly figure and return as JSON ────────────────────────
+        # ── 8. Build Plotly figure ────────────────────────────────────────────
         variant_pvi = selected_light.plasmid_variant_index
         fig = build_3d_fingerprint(
             lineage_mutations=mutations,
@@ -772,6 +772,12 @@ def get_mutation_fingerprint_3d(experiment_id: str, variant_id: str):
             structure_source=structure_info.get('source', structure_info.get('status', 'Structure')),
             feature_annotations=feature_annotations,
         )
+
+        # ?format=html → self-contained interactive HTML (no react-plotly.js needed)
+        if request.args.get('format') == 'html':
+            html = fig.to_html(include_plotlyjs='cdn', full_html=True, config={'responsive': True})
+            return Response(html, mimetype='text/html')
+
         import json as _json
         fig_json = _json.loads(fig.to_json())
 
@@ -787,6 +793,123 @@ def get_mutation_fingerprint_3d(experiment_id: str, variant_id: str):
             'numNonSynonymous': num_nonsynonymous,
             'structureStatus': structure_info.get('status', ''),
             'lineageLength': len(lineage),
+        }), 200
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': 'Server error'}), 500
+
+
+@experiments_bp.route('/<experiment_id>/fingerprint_linear/<variant_id>', methods=['GET'])
+def get_mutation_fingerprint_linear(experiment_id: str, variant_id: str):
+    """
+    Return a Plotly JSON figure for the linear mutation fingerprint.
+    Triangles on a horizontal backbone, one colour per generation.
+    """
+    user_id = require_auth()
+    if not user_id:
+        return jsonify({'success': False, 'error': 'Not authenticated'}), 401
+
+    try:
+        experiment = experiment_service.get_experiment_by_id(experiment_id, user_id)
+        if not experiment:
+            return jsonify({'success': False, 'error': 'Experiment not found'}), 404
+
+        exp_uuid = uuid.UUID(experiment_id)
+        var_uuid = uuid.UUID(variant_id)
+
+        wt_protein_len = len((experiment.wt_protein_sequence or '').strip()) or 500
+
+        # Lightweight variant rows for lineage walk
+        all_light = (
+            db.query(
+                VariantData.id,
+                VariantData.plasmid_variant_index,
+                VariantData.parent_plasmid_variant,
+                VariantData.generation,
+                VariantData.activity_score,
+            )
+            .filter(VariantData.experiment_id == exp_uuid)
+            .all()
+        )
+        by_pvi = {r.plasmid_variant_index: r for r in all_light}
+        by_id  = {r.id: r for r in all_light}
+
+        selected_light = by_id.get(var_uuid)
+        if not selected_light:
+            return jsonify({'success': False, 'error': 'Variant not found'}), 404
+
+        # Lineage walk
+        lineage_pvs = []
+        current = selected_light
+        visited: set = set()
+        while current is not None and current.plasmid_variant_index not in visited:
+            visited.add(current.plasmid_variant_index)
+            lineage_pvs.append(current)
+            parent_pvi = current.parent_plasmid_variant
+            current = by_pvi.get(parent_pvi) if parent_pvi is not None and parent_pvi >= 0 else None
+        lineage_pvs.sort(key=lambda r: r.generation)
+
+        # Load mutations for the lineage
+        lineage_ids = [r.id for r in lineage_pvs]
+        lineage_variants = (
+            db.query(VariantData)
+            .filter(VariantData.id.in_(lineage_ids))
+            .options(joinedload(VariantData.mutations))
+            .all()
+        )
+        lineage_by_id = {v.id: v for v in lineage_variants}
+        lineage = [lineage_by_id[r.id] for r in lineage_pvs if r.id in lineage_by_id]
+
+        # Delta walk — collect mutations introduced at each generation
+        all_mutations_raw = {}
+        prev_keys: set = set()
+        for step in lineage:
+            step_keys = {
+                (m.position, m.wild_type, m.mutant, m.mutation_type)
+                for m in (step.mutations or [])
+            }
+            new_keys = step_keys - prev_keys
+            for m in (step.mutations or []):
+                key = (m.position, m.wild_type, m.mutant, m.mutation_type)
+                if key in new_keys and key not in all_mutations_raw:
+                    all_mutations_raw[key] = {
+                        'position': m.position,
+                        'wt_aa': m.wild_type,
+                        'mut_aa': m.mutant,
+                        'mutation_type': m.mutation_type,
+                        'wt_codon': m.wt_codon or 'n/a',
+                        'mut_codon': m.mut_codon or 'n/a',
+                        'aa_change': f"{m.wild_type}{m.position}{m.mutant}",
+                        'generation': step.generation,
+                    }
+            prev_keys = step_keys
+
+        mutations = sorted(all_mutations_raw.values(), key=lambda m: m['position'])
+
+        import json as _json
+        fig = build_linear_fingerprint(
+            lineage_mutations=mutations,
+            wt_protein_len=wt_protein_len,
+            variant_id=selected_light.plasmid_variant_index,
+        )
+
+        # ?format=html → self-contained interactive HTML (no react-plotly.js needed)
+        if request.args.get('format') == 'html':
+            html = fig.to_html(include_plotlyjs='cdn', full_html=True, config={'responsive': True})
+            return Response(html, mimetype='text/html')
+
+        fig_json = _json.loads(fig.to_json())
+
+        return jsonify({
+            'success': True,
+            'figure': fig_json,
+            'plasmidVariantIndex': selected_light.plasmid_variant_index,
+            'generation': selected_light.generation,
+            'activityScore': safe_float(selected_light.activity_score),
+            'numMutations': len(mutations),
+            'wtProteinLen': wt_protein_len,
         }), 200
 
     except Exception as e:
@@ -1061,6 +1184,82 @@ def analyze_sequences(experiment_id: str):
         traceback.print_exc()
         db.rollback()
         return jsonify({'success': False, 'error': f'Failed to start analysis: {str(e)}'}), 500
+
+
+@experiments_bp.route('/<experiment_id>/mutations/export', methods=['GET'])
+def export_mutations_csv(experiment_id: str):
+    """
+    Stream a CSV of all mutations for an experiment.
+    Columns: variant_index, generation, position, wt_aa, mut_aa,
+             wt_codon, mut_codon, mutation_type, aa_change, generation_introduced
+    """
+    user_id = require_auth()
+    if not user_id:
+        return jsonify({'success': False, 'error': 'Not authenticated'}), 401
+
+    try:
+        experiment = experiment_service.get_experiment_by_id(experiment_id, user_id)
+        if not experiment:
+            return jsonify({'success': False, 'error': 'Experiment not found'}), 404
+
+        exp_uuid = uuid.UUID(experiment_id) if isinstance(experiment_id, str) else experiment_id
+
+        # Load all variants + mutations in one query to avoid N+1
+        from sqlalchemy.orm import joinedload as _jl
+        variants = (
+            db.query(VariantData)
+            .filter(VariantData.experiment_id == exp_uuid)
+            .options(_jl(VariantData.mutations))
+            .order_by(VariantData.generation.asc(), VariantData.plasmid_variant_index.asc())
+            .all()
+        )
+
+        if not variants:
+            return jsonify({'success': False, 'error': 'No variants found for this experiment'}), 404
+
+        import csv as _csv
+        output = io.StringIO()
+        fieldnames = [
+            'variant_index', 'generation',
+            'position', 'wt_aa', 'mut_aa',
+            'wt_codon', 'mut_codon',
+            'mutation_type', 'aa_change',
+            'generation_introduced',
+        ]
+        writer = _csv.DictWriter(output, fieldnames=fieldnames)
+        writer.writeheader()
+
+        for v in variants:
+            for m in (v.mutations or []):
+                writer.writerow({
+                    'variant_index':        v.plasmid_variant_index,
+                    'generation':           v.generation,
+                    'position':             m.position,
+                    'wt_aa':                m.wild_type,
+                    'mut_aa':               m.mutant,
+                    'wt_codon':             m.wt_codon or '',
+                    'mut_codon':            m.mut_codon or '',
+                    'mutation_type':        m.mutation_type,
+                    'aa_change':            f"{m.wild_type}{m.position}{m.mutant}",
+                    'generation_introduced': m.generation_introduced,
+                })
+
+        output.seek(0)
+        buf = io.BytesIO(output.getvalue().encode('utf-8'))
+        safe_name = (experiment.name or experiment_id).replace(' ', '_')
+        filename = f"{safe_name}_mutations.csv"
+
+        return send_file(
+            buf,
+            mimetype='text/csv',
+            as_attachment=True,
+            download_name=filename,
+        )
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': 'Server error'}), 500
 
 
 @experiments_bp.route('/<experiment_id>/plots/activity-distribution', methods=['GET'])

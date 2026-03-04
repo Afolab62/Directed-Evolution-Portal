@@ -1,201 +1,237 @@
 # Directed Evolution Portal
 
-A full-stack web application for managing directed evolution experiments and data.
+A full-stack web application for monitoring, analysing, and visualising directed evolution experiments.  
+Built as an MSc Bioinformatics Group Project (2026).
+
+> For a detailed system design, database schema, and design decision log see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Table of Contents
 
+- [Features](#features)
+- [Tech Stack](#tech-stack)
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
-  - [1. Clone the Repository](#1-clone-the-repository)
-  - [2. Backend Setup](#2-backend-setup)
-  - [3. Frontend Setup](#3-frontend-setup)
-  - [4. Environment Configuration](#4-environment-configuration)
 - [Running the Application](#running-the-application)
 - [Project Structure](#project-structure)
-- [Tech Stack](#tech-stack)
+- [API Overview](#api-overview)
+- [Environment Variables](#environment-variables)
+
+---
+
+## Features
+
+- **Experiment management** — create experiments linked to a UniProt protein accession and a plasmid sequence
+- **Plasmid validation** — automatic ORF detection and codon-to-protein translation with detailed QC flags
+- **Data upload** — parse CSV/TSV files of variant activity scores; normalise and store per-generation
+- **Sequence analysis** — Needleman-Wunsch global alignment with circular-plasmid rotation correction to detect synonymous and non-synonymous mutations at every variant position
+- **Analysis dashboard** with four visualisation tabs:
+  - _Overview_ — matplotlib violin plot of activity score distribution per generation (server-rendered) + summary stats table
+  - _Top Performers_ — ranked table of the 10 highest-activity variants with their mutation lists
+  - _Mutation Fingerprint_ — Plotly 3-D residue heatmap showing mutation frequency across the protein structure
+  - _Activity Landscape_ — UMAP/PCA embedding of variant sequences coloured by activity score
+- **UniProt integration** — automatic fetch and caching of protein features (domains, active sites, etc.)
+- **Authentication** — bcrypt-hashed user accounts with server-side Flask-Session cookies
+
+---
+
+## Tech Stack
+
+| Layer           | Technology                                                                        |
+| --------------- | --------------------------------------------------------------------------------- |
+| Frontend        | Next.js 14 (App Router), TypeScript, Tailwind CSS, shadcn/ui, react-plotly.js     |
+| Backend         | Flask 3, Python 3.13, SQLAlchemy 2, matplotlib, numpy, pandas                     |
+| Database        | PostgreSQL via [Neon](https://neon.tech/) (serverless, no local install required) |
+| Auth            | bcrypt + Flask-Session (filesystem)                                               |
+| Package manager | pnpm (frontend), pip (backend), npm (root dev runner)                             |
+
+---
 
 ## Prerequisites
 
-Before you begin, ensure you have the following installed on your system:
+- **Python 3.10+** — [python.org](https://www.python.org/downloads/)
+- **Node.js 18+** — [nodejs.org](https://nodejs.org/)
+- **pnpm** — `npm install -g pnpm`
+- **Git** — [git-scm.com](https://git-scm.com/downloads)
 
-- **Python 3.8+** - [Download Python](https://www.python.org/downloads/)
-- **Node.js 18+** - [Download Node.js](https://nodejs.org/)
-- **pnpm** - Install via: `npm install -g pnpm`
-- **Git** - [Download Git](https://git-scm.com/downloads)
+A [Neon](https://neon.tech/) free-tier account is required for the PostgreSQL database.  
+No local database installation is needed.
 
-**Note:** This project uses [Neon](https://neon.tech/) as a cloud PostgreSQL database, so you don't need to install PostgreSQL locally.
+---
 
 ## Installation
 
-### 1. Clone the Repository
+### 1. Clone the repository
 
 ```bash
 git clone <repository-url>
+cd Directed-Evolution-Portal
 ```
 
-### 2. Backend Setup
-
-#### 2.1. Navigate to the backend directory
+### 2. Backend setup
 
 ```bash
 cd backend
-```
 
-#### 2.2. Create a Python virtual environment
+# Create and activate a virtual environment
+python -m venv .venv
+# Windows:
+.venv\Scripts\activate
+# macOS / Linux:
+source .venv/bin/activate
 
-**On Windows:**
-
-```bash
-python -m venv venv
-venv\Scripts\activate
-```
-
-**On macOS/Linux:**
-
-```bash
-python3 -m venv venv
-source venv/bin/activate
-```
-
-#### 2.3. Install Python dependencies
-
-```bash
+# Install Python dependencies
 pip install -r requirements.txt
 ```
 
-### 3. Frontend Setup
-
-#### 3.1. Navigate to the frontend directory
+### 3. Frontend setup
 
 ```bash
 cd ../frontend
-```
-
-#### 3.2. Install frontend dependencies
-
-```bash
 pnpm install
 ```
 
-### 4. Environment Configuration
+### 4. Environment configuration
 
-#### 4.1. Backend Environment Variables
-
-Create a `.env` file in the `backend/` directory:
+#### backend/.env
 
 ```env
-# Secret key for Flask session management
-SECRET_KEY=your-secret-key-here
-
-# Database connection string (Neon PostgreSQL)
-DATABASE_URL=postgresql://your-neon-connection-string
-
-# Frontend URL for CORS
+SECRET_KEY=change-me-to-a-long-random-string
+DATABASE_URL=postgresql://user:pass@host/dbname?sslmode=require
 FRONTEND_URL=http://localhost:3000
 ```
 
-**Important:** Replace the placeholder values with your actual configuration:
-
-- Update `DATABASE_URL` with your Neon database connection string (available in your Neon dashboard)
-- Adjust `FRONTEND_URL` if using a different port
-
-**Note:** The Neon connection string should include `?sslmode=require` for secure connections.
-
-#### 4.2. Frontend Environment Variables
-
-Create a `.env.local` file in the `frontend/` directory:
+#### frontend/.env.local
 
 ```env
-# Frontend environment variables
 NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
 ```
 
+---
+
 ## Running the Application
 
-### Option 1: Run Both Frontend and Backend Simultaneously
+### Both servers together (recommended for development)
 
-From the **root directory** of the project:
+From the **project root**:
 
 ```bash
-npm install
+npm install   # first time only
 npm run dev
 ```
 
-This will start:
+This starts:
 
-- Backend server on `http://localhost:8000`
-- Frontend development server on `http://localhost:3000`
+- Flask API on **http://localhost:8000**
+- Next.js dev server on **http://localhost:3000**
 
-### Option 2: Run Backend and Frontend Separately
-
-#### Start the Backend Server
+### Servers separately
 
 ```bash
+# Terminal 1 — backend
 cd backend
-# Activate virtual environment first (if not already activated)
-# Windows: venv\Scripts\activate
-# macOS/Linux: source venv/bin/activate
+# activate venv first
 python run.py
-```
 
-The backend API will be available at `http://localhost:8000`
-
-#### Start the Frontend Development Server
-
-In a new terminal:
-
-```bash
+# Terminal 2 — frontend
 cd frontend
 pnpm dev
 ```
 
-The frontend will be available at `http://localhost:3000`
+---
 
 ## Project Structure
 
 ```
 Directed-Evolution-Portal/
-├── backend/                 # Flask backend application
-│   ├── models/             # Database models
-│   ├── routes/             # API route handlers
-│   ├── services/           # Business logic
-│   ├── config.py           # Application configuration
-│   ├── database.py         # Database initialization
-│   ├── run.py              # Application entry point
-│   └── requirements.txt    # Python dependencies
-├── frontend/               # Next.js frontend application
-│   ├── app/                # Next.js app directory
-│   ├── components/         # React components
-│   ├── hooks/              # Custom React hooks
-│   ├── lib/                # Utility functions
-│   ├── public/             # Static assets
-│   └── package.json        # Node.js dependencies
-└── package.json            # Root package.json for running both servers
+├── backend/
+│   ├── models/                 SQLAlchemy ORM models
+│   │   ├── user.py             User account
+│   │   └── experiment.py       Experiment, VariantData, Mutation
+│   ├── routes/
+│   │   ├── auth.py             POST /api/auth/register|login|logout, GET /api/auth/me
+│   │   ├── experiments.py      Full experiment + analysis + plot API
+│   │   ├── uniprot.py          GET /api/uniprot/<accession>
+│   │   └── landscape.py        POST /api/landscape
+│   ├── services/
+│   │   ├── sequence_analyzer.py    NW alignment, rotation offset, mutation detection
+│   │   ├── plasmid_validation.py   ORF detection, translation, QC
+│   │   ├── activity_calculator.py  Score normalisation
+│   │   ├── experimental_data_parser.py  CSV/TSV → VariantData
+│   │   ├── fingerprint_plot.py     PDB structure + mutation frequency heatmap
+│   │   ├── landscape_service.py    UMAP / PCA embedding
+│   │   └── uniprot_client.py       UniProt REST client with disk cache
+│   ├── config.py
+│   ├── database.py
+│   ├── run.py
+│   └── requirements.txt
+│
+├── frontend/
+│   ├── app/
+│   │   ├── dashboard/
+│   │   │   ├── analysis/page.tsx       Analysis dashboard (4 tabs)
+│   │   │   ├── experiments/            Experiment list + detail
+│   │   │   └── new-experiment/         Creation wizard
+│   │   └── page.tsx                    Landing / auth gate
+│   ├── components/
+│   │   ├── analysis/
+│   │   │   ├── activity-distribution-chart.tsx
+│   │   │   ├── top-performers-table.tsx
+│   │   │   ├── mutation-fingerprint.tsx
+│   │   │   └── activity-landscape.tsx
+│   │   └── ui/                         shadcn/ui primitives
+│   ├── hooks/
+│   ├── lib/types.ts                    Shared TypeScript types
+│   └── package.json
+│
+├── ARCHITECTURE.md             System design, schema, design decisions
+├── package.json                Root dev runner (concurrently)
+└── README.md
 ```
 
-## Tech Stack
+---
 
-### Backend
+## API Overview
 
-- **Flask** - Python web framework
-- **SQLAlchemy** - ORM for database operations
-- **PostgreSQL (Neon)** - Serverless PostgreSQL database
-- **Flask-CORS** - Cross-Origin Resource Sharing support
-- **Flask-Session** - Server-side session management
-- **bcrypt** - Password hashing
+| Method | Path                                                | Description                             |
+| ------ | --------------------------------------------------- | --------------------------------------- |
+| POST   | `/api/auth/register`                                | Create account                          |
+| POST   | `/api/auth/login`                                   | Log in (sets session cookie)            |
+| POST   | `/api/auth/logout`                                  | Destroy session                         |
+| GET    | `/api/auth/me`                                      | Current user                            |
+| GET    | `/api/experiments`                                  | List experiments for logged-in user     |
+| POST   | `/api/experiments`                                  | Create experiment (accession + plasmid) |
+| GET    | `/api/experiments/<id>`                             | Experiment detail + variants            |
+| PATCH  | `/api/experiments/<id>`                             | Update name / metadata                  |
+| DELETE | `/api/experiments/<id>`                             | Delete experiment and all variants      |
+| POST   | `/api/experiments/<id>/upload-data`                 | Upload CSV/TSV of variant data          |
+| POST   | `/api/experiments/<id>/analyze-sequences`           | Start background mutation analysis      |
+| GET    | `/api/experiments/<id>/top-performers`              | Top N variants by activity score        |
+| GET    | `/api/experiments/<id>/plots/activity-distribution` | PNG violin plot (matplotlib)            |
+| GET    | `/api/uniprot/<accession>`                          | Fetch + cache UniProt protein features  |
+| POST   | `/api/landscape`                                    | Compute UMAP/PCA embedding              |
 
-### Frontend
+All endpoints require a valid session cookie except `/api/auth/register` and `/api/auth/login`.
 
-- **Next.js** - React framework
-- **TypeScript** - Type-safe JavaScript
-- **Radix UI** - Accessible UI components
-- **Tailwind CSS** - Utility-first CSS framework
-- **pnpm** - Fast, disk space efficient package manager
+---
+
+## Environment Variables
+
+### backend/.env
+
+| Variable       | Required | Description                                                        |
+| -------------- | -------- | ------------------------------------------------------------------ |
+| `SECRET_KEY`   | ✅       | Flask session signing key — use a long random string in production |
+| `DATABASE_URL` | ✅       | Full Neon PostgreSQL connection string with `?sslmode=require`     |
+| `FRONTEND_URL` | ✅       | Allowed CORS origin (e.g. `http://localhost:3000`)                 |
+
+### frontend/.env.local
+
+| Variable                  | Required | Description                                       |
+| ------------------------- | -------- | ------------------------------------------------- |
+| `NEXT_PUBLIC_BACKEND_URL` | ✅       | Flask API base URL (e.g. `http://localhost:8000`) |
+
+---
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
-
-## Support
-
-For support, please open an issue in the GitHub repository.
+MIT

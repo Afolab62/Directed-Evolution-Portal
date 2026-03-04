@@ -40,7 +40,9 @@ export function ActivityDistributionChart({
     )
       .then((res) => {
         if (!res.ok)
-          return res.json().then((j) => { throw new Error(j.error || `Server error ${res.status}`); });
+          return res.json().then((j) => {
+            throw new Error(j.error || `Server error ${res.status}`);
+          });
         return res.blob();
       })
       .then((blob) => {
@@ -65,9 +67,9 @@ export function ActivityDistributionChart({
 
   // Summary stats computed from variants prop (unchanged)
   const generationStats = useMemo(() => {
-    const generations = [
-      ...new Set(variants.map((v) => v.generation)),
-    ].sort((a, b) => a - b);
+    const generations = [...new Set(variants.map((v) => v.generation))].sort(
+      (a, b) => a - b,
+    );
 
     return generations.map((gen) => {
       const scores = variants
@@ -77,7 +79,15 @@ export function ActivityDistributionChart({
         .sort((a, b) => a - b);
 
       if (scores.length === 0)
-        return { generation: gen, count: 0, meanActivity: 0, medianActivity: 0, minActivity: 0, maxActivity: 0, stdDev: 0 };
+        return {
+          generation: gen,
+          count: 0,
+          meanActivity: 0,
+          medianActivity: 0,
+          minActivity: 0,
+          maxActivity: 0,
+          stdDev: 0,
+        };
 
       const mean = scores.reduce((s, v) => s + v, 0) / scores.length;
       const mid = Math.floor(scores.length / 2);
@@ -125,9 +135,7 @@ export function ActivityDistributionChart({
         </CardDescription>
       </CardHeader>
       <CardContent>
-        {loading && (
-          <Skeleton className="w-full h-95 rounded-md" />
-        )}
+        {loading && <Skeleton className="w-full h-95 rounded-md" />}
         {error && !loading && (
           <div className="w-full h-95 flex items-center justify-center text-muted-foreground text-sm">
             Failed to load plot: {error}
@@ -158,13 +166,25 @@ export function ActivityDistributionChart({
             <tbody>
               {generationStats.map((stat) => (
                 <tr key={stat.generation} className="border-b">
-                  <td className="py-2 px-2 font-medium">Gen {stat.generation}</td>
+                  <td className="py-2 px-2 font-medium">
+                    Gen {stat.generation}
+                  </td>
                   <td className="py-2 px-2">{stat.count}</td>
-                  <td className="py-2 px-2 font-mono">{stat.meanActivity.toFixed(3)}</td>
-                  <td className="py-2 px-2 font-mono">{stat.medianActivity.toFixed(3)}</td>
-                  <td className="py-2 px-2 font-mono text-muted-foreground">{stat.minActivity.toFixed(3)}</td>
-                  <td className="py-2 px-2 font-mono text-green-400">{stat.maxActivity.toFixed(3)}</td>
-                  <td className="py-2 px-2 font-mono text-muted-foreground">{stat.stdDev.toFixed(3)}</td>
+                  <td className="py-2 px-2 font-mono">
+                    {stat.meanActivity.toFixed(3)}
+                  </td>
+                  <td className="py-2 px-2 font-mono">
+                    {stat.medianActivity.toFixed(3)}
+                  </td>
+                  <td className="py-2 px-2 font-mono text-muted-foreground">
+                    {stat.minActivity.toFixed(3)}
+                  </td>
+                  <td className="py-2 px-2 font-mono text-green-400">
+                    {stat.maxActivity.toFixed(3)}
+                  </td>
+                  <td className="py-2 px-2 font-mono text-muted-foreground">
+                    {stat.stdDev.toFixed(3)}
+                  </td>
                 </tr>
               ))}
             </tbody>

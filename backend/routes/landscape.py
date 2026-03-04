@@ -1,8 +1,9 @@
+import json as _json
 import uuid
 from flask import Blueprint, request, jsonify, session
 from database import db
 from models.experiment import VariantData
-from services.landscape_service import compute_fitness_landscape
+from services.landscape_service import build_landscape_figure
 
 landscape_bp = Blueprint('landscape', __name__, url_prefix='/api/experiments')
 
@@ -17,10 +18,13 @@ def require_auth():
 @landscape_bp.route('/<experiment_id>/landscape', methods=['GET'])
 def get_fitness_landscape(experiment_id: str):
     """
-    Compute and return a 3D fitness landscape for an experiment.
+    Compute and return a complete Plotly figure JSON for the 3D activity
+    landscape.  The figure includes per-generation animation frames, three
+    z-mode transforms (robust / raw / normalized), play buttons, and a
+    generation slider — matching the output of 3d_landscape.py.
+
     Query params:
         method: "pca" (default) | "tsne" | "umap"
-        resolution: grid resolution integer (default 50)
     """
     user_id = require_auth()
     if not user_id:
@@ -28,14 +32,11 @@ def get_fitness_landscape(experiment_id: str):
 
     try:
         method = request.args.get('method', 'pca').lower()
-        resolution = min(int(request.args.get('resolution', 50)), 100)
-
         if method not in ('pca', 'tsne', 'umap'):
             return jsonify({'success': False, 'error': 'method must be pca, tsne, or umap'}), 400
 
         exp_uuid = uuid.UUID(experiment_id)
 
-        # Only use variants that have been sequence-analysed and passed QC
         variants = (
             db.query(VariantData)
             .filter_by(experiment_id=exp_uuid, qc_status='passed', is_control=False)
@@ -51,19 +52,21 @@ def get_fitness_landscape(experiment_id: str):
                          'Run sequence analysis first.'
             }), 422
 
-        sequences = [v.protein_sequence for v in variants]
-        activity_scores = [v.activity_score for v in variants]
-        variant_ids = [str(v.id) for v in variants]
-
-        landscape = compute_fitness_landscape(
-            sequences=sequences,
-            activity_scores=activity_scores,
+        fig = build_landscape_figure(
+            sequences      =[v.protein_sequence for v in variants],
+            activity_scores=[float(v.activity_score) for v in variants],
+            generations    =[v.generation for v in variants],
+            variant_indices=[v.plasmid_variant_index for v in variants],
             method=method,
-            grid_resolution=resolution,
         )
-        landscape['variant_ids'] = variant_ids
 
-        return jsonify({'success': True, **landscape}), 200
+        fig_json = _json.loads(fig.to_json())
+        return jsonify({
+            'success':       True,
+            'figure':        fig_json,
+            'variant_count': len(variants),
+            'method':        method,
+        }), 200
 
     except ValueError as e:
         return jsonify({'success': False, 'error': str(e)}), 422

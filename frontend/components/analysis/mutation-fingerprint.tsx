@@ -107,11 +107,12 @@ export function MutationFingerprint({
   experimentId,
   selectedVariantIndex,
   onSelectVariant,
+  wtSequence,
 }: MutationFingerprintProps) {
   const [activeTab, setActiveTab] = useState<"linear" | "3d">("linear");
   const [fp3dRequested, setFp3dRequested] = useState(false);
 
-  // Reset 3D-requested flag and tab when variant changes
+  // Reset when variant changes
   useEffect(() => {
     setFp3dRequested(false);
     setActiveTab("linear");

@@ -462,6 +462,8 @@ def build_linear_fingerprint(
     lineage_mutations: list[dict[str, Any]],
     wt_protein_len: int,
     variant_id: int | float,
+    window_start: int | None = None,
+    window_end: int | None = None,
 ) -> go.Figure:
     """
     Build a linear (unfolded) mutation fingerprint Plotly figure.
@@ -472,7 +474,17 @@ def build_linear_fingerprint(
     * Downward triangles   = mutation positions
     * Colour               = generation the mutation was introduced
     * Text labels          = 'WT>Mut (m/s)' stacked to avoid overlap
+
+    Optional window_start / window_end restrict which mutations are shown
+    and zoom the x-axis to that residue range for a closer view.
     """
+    # Apply position window — filter to residues in [window_start, window_end]
+    if window_start is not None and window_end is not None:
+        lineage_mutations = [
+            m for m in lineage_mutations
+            if window_start <= int(m["position"]) <= window_end
+        ]
+
     _LABEL_THRESHOLD = 80
     show_labels = len(lineage_mutations) <= _LABEL_THRESHOLD
 
@@ -596,11 +608,14 @@ def build_linear_fingerprint(
         title=f"Variant {variant_id} — Linear Mutation Fingerprint by Generation{note}",
         xaxis={
             "title": "Amino Acid Position",
-            "range": [-15, wt_protein_len + 15],
+            "range": [
+                (window_start - 5) if window_start is not None else -15,
+                (window_end   + 5) if window_end   is not None else wt_protein_len + 15,
+            ],
             "showgrid": True,
             "gridcolor": "#e2e8f0",
             "tickmode": "linear",
-            "dtick": 100,
+            "dtick": max(1, ((window_end or wt_protein_len) - (window_start or 0)) // 10),
             "zeroline": False,
         },
         yaxis={

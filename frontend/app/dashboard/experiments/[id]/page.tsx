@@ -2,7 +2,7 @@
 
 import React from "react";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import { useRouter, useParams } from "next/navigation";
 import {
@@ -44,6 +44,9 @@ export default function ExperimentDetailPage() {
   const [analysisBanner, setAnalysisBanner] = useState<{
     message: string;
   } | null>(null);
+  // Elapsed-seconds counter shown while analysis is running
+  const [elapsedSecs, setElapsedSecs] = useState(0);
+  const analysisStartRef = useRef<number | null>(null);
   const [uploadResult, setUploadResult] = useState<{
     parsed: number;
     processed: number;
@@ -54,8 +57,28 @@ export default function ExperimentDetailPage() {
   } | null>(null);
 
   useEffect(() => {
-    loadExperiment();
+    loadExperiment(); // fast — clears the full-page spinner
+    loadVariants();   // slow — populates variant-dependent UI in background
   }, [id]);
+
+  // Tick the elapsed-seconds counter while analysis is running
+  useEffect(() => {
+    if (experiment?.analysisStatus !== "analyzing") {
+      analysisStartRef.current = null;
+      setElapsedSecs(0);
+      return;
+    }
+    // Record start time on first render showing "analyzing"
+    if (analysisStartRef.current === null) {
+      analysisStartRef.current = Date.now();
+    }
+    const tick = setInterval(() => {
+      setElapsedSecs(
+        Math.floor((Date.now() - (analysisStartRef.current ?? Date.now())) / 1000),
+      );
+    }, 1000);
+    return () => clearInterval(tick);
+  }, [experiment?.analysisStatus]);
 
   // Poll every 5 seconds while analysis is running — status only, no variants
   useEffect(() => {
@@ -76,8 +99,8 @@ export default function ExperimentDetailPage() {
             setIsAnalyzing(false);
             if (data.experiment.analysisStatus === "completed") {
               setJustCompleted(true);
-              // Keep the success state visible for 5s before settling on "Re-analyze"
-              setTimeout(() => setJustCompleted(false), 5000);
+              // Keep the success state for 10 s before settling on "Re-analyse"
+              setTimeout(() => setJustCompleted(false), 10000);
               // Show persistent banner
               setAnalysisBanner({
                 message:
@@ -85,12 +108,12 @@ export default function ExperimentDetailPage() {
                   "Sequences analyzed successfully",
               });
               // Reload variants now that analysis is done
-              loadExperiment();
+              loadVariants();
               toast({
                 title: "Analysis Complete!",
                 description:
                   data.experiment.analysisMessage ||
-                  "Sequences analyzed successfully",
+                  "Sequences analysed successfully",
               });
             } else if (data.experiment.analysisStatus === "failed") {
               toast({
@@ -110,19 +133,16 @@ export default function ExperimentDetailPage() {
     return () => clearInterval(interval);
   }, [experiment?.analysisStatus, id]);
 
+  // Fast: metadata only — gates the initial page display
   const loadExperiment = async () => {
     try {
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000"}/api/experiments/${id}`,
-        {
-          credentials: "include",
-        },
+        `${process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000"}/api/experiments/${id}?include_variants=false`,
+        { credentials: "include" },
       );
       const data = await res.json();
-
       if (data.success) {
         setExperiment(data.experiment);
-        setVariants(data.variants || []);
       } else {
         toast({ title: "Experiment not found", variant: "destructive" });
         router.push("/dashboard/experiments");
@@ -132,6 +152,22 @@ export default function ExperimentDetailPage() {
       toast({ title: "Failed to load experiment", variant: "destructive" });
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // Slower: loads variant rows in the background — doesn't block page display
+  const loadVariants = async () => {
+    try {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000"}/api/experiments/${id}`,
+        { credentials: "include" },
+      );
+      const data = await res.json();
+      if (data.success) {
+        setVariants(data.variants || []);
+      }
+    } catch {
+      // Silently ignore — not critical for page structure
     }
   };
 
@@ -165,6 +201,7 @@ export default function ExperimentDetailPage() {
           description: `Parsed ${result.processed} variants successfully. ${result.failedQC} rows failed QC.`,
         });
         loadExperiment();
+        loadVariants();
       } else {
         toast({
           title: result.error || "Failed to parse data",
@@ -198,8 +235,6 @@ export default function ExperimentDetailPage() {
       const result = await res.json();
 
       if (result.success) {
-        // Backend starts analysis in background and returns immediately.
-        // Update local state so polling useEffect kicks in.
         toast({
           title: "Analysis Started",
           description:
@@ -208,7 +243,10 @@ export default function ExperimentDetailPage() {
         setExperiment((prev) =>
           prev ? { ...prev, analysisStatus: "analyzing" } : prev,
         );
-        // isAnalyzing stays true — polling will set it false when done
+        // Clear the POST-in-flight flag immediately.
+        // From here, the button loading state is driven purely by
+        // experiment.analysisStatus (kept current by the polling effect).
+        setIsAnalyzing(false);
       } else {
         toast({
           title: result.error || "Analysis failed",
@@ -218,7 +256,7 @@ export default function ExperimentDetailPage() {
       }
     } catch (error) {
       console.error("Analysis error:", error);
-      toast({ title: "Failed to analyze sequences", variant: "destructive" });
+      toast({ title: "Failed to analyse sequences", variant: "destructive" });
       setIsAnalyzing(false);
     }
   };
@@ -270,6 +308,34 @@ export default function ExperimentDetailPage() {
         </Badge>
       </div>
 
+      {/* Global analysis status banners — always visible regardless of active tab */}
+      {experiment.analysisStatus === "analyzing" && (
+        <div className="flex items-center gap-3 p-3 rounded-lg bg-blue-50 border border-blue-200 text-blue-800 dark:bg-blue-950 dark:border-blue-800 dark:text-blue-300">
+          <Loader2 className="h-4 w-4 animate-spin shrink-0 text-blue-600 dark:text-blue-400" />
+          <p className="text-sm flex-1">
+            Sequence analysis in progress
+            {elapsedSecs > 0 && (
+              <span className="ml-1 font-mono text-xs">({elapsedSecs}s elapsed)</span>
+            )}
+            {" — results will appear automatically when done"}
+          </p>
+        </div>
+      )}
+      {analysisBanner && (
+        <div className="flex items-start gap-3 p-4 rounded-lg bg-green-50 border border-green-200 text-green-800 dark:bg-green-950 dark:border-green-800 dark:text-green-300">
+          <CheckCircle2 className="h-5 w-5 mt-0.5 shrink-0 text-green-600" />
+          <div className="flex-1">
+            <p className="text-sm font-semibold">Analysis Complete!</p>
+            <p className="text-sm">{analysisBanner.message}</p>
+          </div>
+          <button
+            onClick={() => setAnalysisBanner(null)}
+            className="shrink-0 text-green-600 hover:text-green-800 dark:text-green-400 dark:hover:text-green-200"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
       <Tabs defaultValue="overview">
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
@@ -540,7 +606,7 @@ export default function ExperimentDetailPage() {
                   Sequence Analysis
                 </CardTitle>
                 <CardDescription>
-                  Analyze DNA sequences to detect protein mutations
+                  Analyse DNA sequences to detect protein mutations
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -559,7 +625,7 @@ export default function ExperimentDetailPage() {
                         <>
                           <Loader2 className="h-4 w-4 animate-spin text-primary" />
                           <span className="text-sm text-muted-foreground">
-                            Analysis in progress...
+                            Analysis in progress — see banner above
                           </span>
                         </>
                       ) : experiment.analysisStatus === "failed" ? (
@@ -593,11 +659,10 @@ export default function ExperimentDetailPage() {
                           : "border-transparent bg-primary text-primary-foreground hover:bg-primary/90"
                     }
                   >
-                    {isAnalyzing ||
-                    experiment.analysisStatus === "analyzing" ? (
+                    {isAnalyzing || experiment.analysisStatus === "analyzing" ? (
                       <>
                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        Analyzing...
+                        Analysing…
                       </>
                     ) : justCompleted ? (
                       <>
@@ -607,28 +672,17 @@ export default function ExperimentDetailPage() {
                     ) : experiment.analysisStatus === "completed" ? (
                       <>
                         <CheckCircle2 className="h-4 w-4 mr-2" />
-                        Re-analyze
+                        Re-analyse
                       </>
                     ) : (
                       <>
                         <Dna className="h-4 w-4 mr-2" />
-                        Analyze Sequences
+                        Analyse Sequences
                       </>
                     )}
                   </Button>
                 </div>
-                {analysisBanner && (
-                  <div className="flex items-start gap-3 p-3 rounded-lg bg-green-50 border border-green-200 text-green-800 dark:bg-green-950 dark:border-green-800 dark:text-green-300">
-                    <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" />
-                    <p className="text-sm flex-1">{analysisBanner.message}</p>
-                    <button
-                      onClick={() => setAnalysisBanner(null)}
-                      className="shrink-0 text-green-600 hover:text-green-800 dark:text-green-400 dark:hover:text-green-200"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  </div>
-                )}
+                {/* analysisBanner is now shown globally above the tabs */}
                 <div className="text-sm text-muted-foreground space-y-1">
                   <p>• Translates DNA sequences to protein sequences</p>
                   <p>• Detects mutations compared to wild-type</p>

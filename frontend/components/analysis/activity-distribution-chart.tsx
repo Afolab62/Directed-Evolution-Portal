@@ -145,7 +145,7 @@ export function ActivityDistributionChart({
           <img
             src={imgSrc}
             alt="Activity score distribution by generation"
-            className="w-full rounded-md"
+            className="w-full max-h-[500px] object-contain rounded-lg border border-border"
           />
         )}
 

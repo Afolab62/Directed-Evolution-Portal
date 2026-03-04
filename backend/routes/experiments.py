@@ -775,7 +775,10 @@ def get_mutation_fingerprint_3d(experiment_id: str, variant_id: str):
 
         # ?format=html → self-contained interactive HTML (no react-plotly.js needed)
         if request.args.get('format') == 'html':
-            html = fig.to_html(include_plotlyjs='cdn', full_html=True, config={'responsive': True})
+            html = fig.to_html(include_plotlyjs='cdn', full_html=True, config={
+                'responsive': True,
+                'modeBarButtonsToRemove': ['select2d', 'lasso2d'],
+            })
             return Response(html, mimetype='text/html')
 
         import json as _json
@@ -889,15 +892,24 @@ def get_mutation_fingerprint_linear(experiment_id: str, variant_id: str):
         mutations = sorted(all_mutations_raw.values(), key=lambda m: m['position'])
 
         import json as _json
+        # Optional position window for zoomed / sliced views
+        _win_start = request.args.get('window_start', type=int)
+        _win_end   = request.args.get('window_end',   type=int)
+
         fig = build_linear_fingerprint(
             lineage_mutations=mutations,
             wt_protein_len=wt_protein_len,
             variant_id=selected_light.plasmid_variant_index,
+            window_start=_win_start,
+            window_end=_win_end,
         )
 
         # ?format=html → self-contained interactive HTML (no react-plotly.js needed)
         if request.args.get('format') == 'html':
-            html = fig.to_html(include_plotlyjs='cdn', full_html=True, config={'responsive': True})
+            html = fig.to_html(include_plotlyjs='cdn', full_html=True, config={
+                'responsive': True,
+                'modeBarButtonsToRemove': ['select2d', 'lasso2d'],
+            })
             return Response(html, mimetype='text/html')
 
         fig_json = _json.loads(fig.to_json())
@@ -1320,16 +1332,16 @@ def plot_activity_distribution(experiment_id: str):
         if not data:
             return jsonify({'success': False, 'error': 'Not enough data points per generation to draw violin plots (need ≥2 per generation)'}), 404
 
-        fig, ax = plt.subplots(figsize=(10, 7))
-        fig.patch.set_facecolor('#0f172a')   # dark background to match portal
-        ax.set_facecolor('#1e293b')
+        fig, ax = plt.subplots(figsize=(11, 6))
+        fig.patch.set_facecolor('#ffffff')
+        ax.set_facecolor('#f8fafc')
 
-        violins = ax.violinplot(data, widths=0.9, points=200)
+        violins = ax.violinplot(data, widths=0.75, points=200)
 
         for pc in violins['bodies']:
-            pc.set_facecolor('#add8e6')
-            pc.set_edgecolor('#5aa0c8')
-            pc.set_alpha(0.8)
+            pc.set_facecolor('#bfdbfe')   # blue-200
+            pc.set_edgecolor('#3b82f6')   # blue-500
+            pc.set_alpha(0.85)
         for part in ('cbars', 'cmins', 'cmaxes'):
             if part in violins:
                 violins[part].set_visible(False)
@@ -1340,28 +1352,29 @@ def plot_activity_distribution(experiment_id: str):
             mean = np.mean(v)
             median = np.median(v)
 
-            ax.vlines(i, vmin, vmax, linewidth=2, colors='#1e40af')
-            ax.hlines(vmin,   i - 0.12, i + 0.12, linewidth=2, colors='#1e40af')
-            ax.hlines(vmax,   i - 0.12, i + 0.12, linewidth=2, colors='#1e40af')
-            ax.hlines(mean,   i - 0.18, i + 0.18, linewidth=3, colors='#1e40af')
-            ax.hlines(median, i - 0.18, i + 0.18, linewidth=3, colors='#1e40af')
+            ax.vlines(i, vmin, vmax, linewidth=1.5, colors='#2563eb')   # blue-600
+            ax.hlines(vmin,   i - 0.12, i + 0.12, linewidth=1.5, colors='#2563eb')
+            ax.hlines(vmax,   i - 0.12, i + 0.12, linewidth=1.5, colors='#2563eb')
+            ax.hlines(mean,   i - 0.18, i + 0.18, linewidth=2.5, colors='#1d4ed8')  # blue-700
+            ax.hlines(median, i - 0.18, i + 0.18, linewidth=2.5, colors='#7c3aed')  # violet-700
 
         ax.set_xticks(range(1, len(gens) + 1))
-        ax.set_xticklabels([f'Gen {int(g)}' for g in gens], color='#94a3b8')
-        ax.tick_params(colors='#94a3b8')
-        ax.set_xlabel('Generation', color='#94a3b8')
-        ax.set_ylabel('Activity Score', color='#94a3b8')
-        ax.set_title('Activity Score Distribution by Generation', color='#e2e8f0')
+        ax.set_xticklabels([f'Gen {int(g)}' for g in gens], color='#475569')
+        ax.tick_params(colors='#475569')
+        ax.set_xlabel('Generation', color='#475569', fontsize=10)
+        ax.set_ylabel('Activity Score', color='#475569', fontsize=10)
+        ax.set_title('Activity Score Distribution by Generation', color='#1e293b', fontsize=12, fontweight='bold', pad=10)
         for spine in ax.spines.values():
-            spine.set_color('#334155')
-        ax.grid(True, color='#334155', linewidth=0.5)
+            spine.set_color('#e2e8f0')
+        ax.grid(True, color='#e2e8f0', linewidth=0.6, linestyle='--')
+        ax.set_axisbelow(True)
 
         plt.tight_layout()
         # ───────────────────────────────────────────────────────────────────────
 
         buf = io.BytesIO()
-        fig.savefig(buf, format='png', dpi=150, bbox_inches='tight',
-                    facecolor=fig.get_facecolor())
+        fig.savefig(buf, format='png', dpi=140, bbox_inches='tight',
+                    facecolor='#ffffff')
         plt.close(fig)
         buf.seek(0)
 

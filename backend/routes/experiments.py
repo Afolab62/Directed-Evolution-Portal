@@ -76,7 +76,7 @@ def create_experiment():
                     'If you have a raw DNA sequence, add a header line such as ">MyPlasmid" before it.'
                 )
             }), 400
-
+# If data doesn't have > header, it is not a valid file so will not be accepted
         dna_chars = set()
         for ln in plasmid_sequence.splitlines():
             if not ln.strip().startswith('>'):

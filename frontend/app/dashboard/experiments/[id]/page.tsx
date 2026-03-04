@@ -58,7 +58,7 @@ export default function ExperimentDetailPage() {
 
   useEffect(() => {
     loadExperiment(); // fast — clears the full-page spinner
-    loadVariants();   // slow — populates variant-dependent UI in background
+    loadVariants(); // slow — populates variant-dependent UI in background
   }, [id]);
 
   // Tick the elapsed-seconds counter while analysis is running
@@ -74,7 +74,9 @@ export default function ExperimentDetailPage() {
     }
     const tick = setInterval(() => {
       setElapsedSecs(
-        Math.floor((Date.now() - (analysisStartRef.current ?? Date.now())) / 1000),
+        Math.floor(
+          (Date.now() - (analysisStartRef.current ?? Date.now())) / 1000,
+        ),
       );
     }, 1000);
     return () => clearInterval(tick);
@@ -315,7 +317,9 @@ export default function ExperimentDetailPage() {
           <p className="text-sm flex-1">
             Sequence analysis in progress
             {elapsedSecs > 0 && (
-              <span className="ml-1 font-mono text-xs">({elapsedSecs}s elapsed)</span>
+              <span className="ml-1 font-mono text-xs">
+                ({elapsedSecs}s elapsed)
+              </span>
             )}
             {" — results will appear automatically when done"}
           </p>
@@ -659,7 +663,8 @@ export default function ExperimentDetailPage() {
                           : "border-transparent bg-primary text-primary-foreground hover:bg-primary/90"
                     }
                   >
-                    {isAnalyzing || experiment.analysisStatus === "analyzing" ? (
+                    {isAnalyzing ||
+                    experiment.analysisStatus === "analyzing" ? (
                       <>
                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                         Analysing…

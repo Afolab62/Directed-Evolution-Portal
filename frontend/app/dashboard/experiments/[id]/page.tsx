@@ -36,6 +36,7 @@ import {
   X,
   RefreshCw,
 } from "lucide-react";
+
 import type { Experiment, VariantData } from "@/lib/types";
 
 type MappingEntry = { rawCol: string; canonicalField: string };
@@ -360,6 +361,24 @@ export default function ExperimentDetailPage() {
       setIsAnalyzing(false);
     }
   };
+
+  // Derived: which required canonical fields are not yet assigned in the mapping review
+  const REQUIRED_CANONICAL_FIELDS = [
+    "plasmid_variant_index",
+    "generation",
+    "assembled_dna_sequence",
+    "dna_yield",
+    "protein_yield",
+    "is_control",
+  ];
+  const assignedCanonicals = new Set(
+    mappingEntries
+      .filter((e) => e.canonicalField !== "__metadata__")
+      .map((e) => e.canonicalField),
+  );
+  const missingRequiredFields = REQUIRED_CANONICAL_FIELDS.filter(
+    (f) => !assignedCanonicals.has(f),
+  );
 
   if (isLoading) {
     return (
@@ -720,42 +739,31 @@ export default function ExperimentDetailPage() {
                     </table>
                   </div>
 
-                  {/* Warning if required fields are missing */}
-                  {(() => {
-                    const required = [
-                      "plasmid_variant_index",
-                      "generation",
-                      "assembled_dna_sequence",
-                      "dna_yield",
-                      "protein_yield",
-                      "is_control",
-                    ];
-                    const assigned = new Set(
-                      mappingEntries
-                        .filter((e) => e.canonicalField !== "__metadata__")
-                        .map((e) => e.canonicalField),
-                    );
-                    const missing = required.filter((f) => !assigned.has(f));
-                    return missing.length > 0 ? (
-                      <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/5 p-3 flex items-start gap-2">
-                        <AlertTriangle className="h-4 w-4 text-yellow-600 mt-0.5 shrink-0" />
-                        <p className="text-sm text-yellow-700 dark:text-yellow-400">
-                          Missing required fields:{" "}
-                          <span className="font-medium">
-                            {missing
-                              .map((f) => FIELD_LABELS[f] ?? f)
-                              .join(", ")}
-                          </span>
-                          . Assign them above or the upload will be blocked.
-                        </p>
-                      </div>
-                    ) : null;
-                  })()}
+                  {/* Error if required fields are missing — blocks upload */}
+                  {missingRequiredFields.length > 0 && (
+                    <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 flex items-start gap-2">
+                      <XCircle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
+                      <p className="text-sm text-destructive">
+                        <span className="font-semibold">Upload blocked — missing required columns: </span>
+                        <span className="font-medium">
+                          {missingRequiredFields
+                            .map((f) => FIELD_LABELS[f] ?? f)
+                            .join(", ")}
+                        </span>
+                        . Your file must contain these columns (or map them above) before you can upload.
+                      </p>
+                    </div>
+                  )}
 
                   <div className="flex gap-3">
                     <Button
                       onClick={handleConfirmMapping}
-                      disabled={isUploading}
+                      disabled={isUploading || missingRequiredFields.length > 0}
+                      title={
+                        missingRequiredFields.length > 0
+                          ? `Upload blocked: missing ${missingRequiredFields.map((f) => FIELD_LABELS[f] ?? f).join(", ")}`
+                          : undefined
+                      }
                     >
                       {isUploading ? (
                         <>

@@ -80,7 +80,7 @@ def _build_synonym_map() -> Dict[str, str]:
 
 _SYNONYM_MAP = _build_synonym_map()
 
-# Bool coercion map — matches mouli.py's coerce_types exactly
+# Bool coercion map 
 _BOOL_MAP = {
     1: True, 0: False,
     "1": True, "0": False,
@@ -93,7 +93,7 @@ _BOOL_MAP = {
 }
 
 
-# ── Row-level QC (mirrors mouli.py validate_row) ─────────────────────────────
+# ── Row-level QC ─────────────────────────────
 
 def _validate_row(row: Dict[str, Any]) -> List[str]:
     errors: List[str] = []
@@ -116,7 +116,7 @@ def _validate_row(row: Dict[str, Any]) -> List[str]:
         errors.append("is_control must be boolean (TRUE/FALSE/1/0)")
 
     seq = row.get("assembled_dna_sequence")
-    if isinstance(seq, str) and seq and not set(seq.upper()).issubset(set("ATCG")):
+    if isinstance(seq, str) and seq and not set(seq.upper()).issubset(set("ATCGNRYZ")):
         errors.append("DNA sequence contains invalid characters (only A/T/C/G allowed)")
 
     return errors
@@ -130,7 +130,36 @@ class ExperimentalDataParser:
         self._all_field_names = list(ESSENTIAL_FIELDS.keys())
         self._required_field_names = list(REQUIRED_FIELDS.keys())
 
-    def process_file(self, file_content: str, file_format: str):
+    def preview_mapping(self, file_content: str, file_format: str) -> dict:
+        """
+        Parse only the header of *file_content* and return the auto-detected
+        column mapping together with the list of all raw column names.
+        Does NOT perform type coercion, QC, or any database work.
+
+        Returns:
+            {
+              "raw_columns": [<original column names> ...],
+              "column_mapping": {<raw_col>: <canonical_field> ...},
+              "metadata_columns": [<unmapped raw column names> ...],
+              "missing_required": [<canonical fields not found> ...],
+              "canonical_fields": [<all canonical field names> ...],
+            }
+        """
+        df = self._parse(file_content, file_format)
+        raw_columns = df.columns.tolist()
+        column_mapping, missing_required = self._map_columns(raw_columns)
+        assigned_raws = set(column_mapping.keys())
+        metadata_columns = [c for c in raw_columns if c not in assigned_raws]
+        return {
+            "raw_columns": raw_columns,
+            "column_mapping": column_mapping,
+            "metadata_columns": metadata_columns,
+            "missing_required": missing_required,
+            "canonical_fields": self._all_field_names,
+        }
+
+    def process_file(self, file_content: str, file_format: str,
+                     column_mapping_override: dict | None = None):
         """
         Parse a TSV or JSON upload and return:
             valid_df, control_df, rejected_df, summary
@@ -139,11 +168,34 @@ class ExperimentalDataParser:
         rejected_df but the upload is never blocked on their account.
         The upload is only blocked if the file itself cannot be read or
         if a required column cannot be found at all.
+
+        If *column_mapping_override* is provided (a {raw_col: canonical_field}
+        dict coming from the frontend mapping-confirmation step), it is used
+        instead of auto-detection.  Auto-detection is still run to verify that
+        all required fields are covered.
         """
         df = self._parse(file_content, file_format)
 
+        # ── 5_change Detect duplicate rows across all columns ─────────────
+        duplicates = df[df.duplicated(keep=False)]
+        if not duplicates.empty:
+            print("\nDuplicate rows detected:")
+            for idx in duplicates.index:
+                print(f"Row {idx + 1} is duplicated")
+            raise ValueError(
+                "Duplicate rows detected in input file. "
+                "Remove duplicates before ingestion."
+            )
+
         # ── Column mapping ────────────────────────────────────────────────
-        column_mapping, missing_required = self._map_columns(df.columns.tolist())
+        if column_mapping_override:
+            column_mapping = {k: v for k, v in column_mapping_override.items()
+                              if k in df.columns and v}  # strip blanks / phantom cols
+            assigned_canonicals = set(column_mapping.values())
+            missing_required = [f for f in self._required_field_names
+                                 if f not in assigned_canonicals]
+        else:
+            column_mapping, missing_required = self._map_columns(df.columns.tolist())
 
         if missing_required:
             raise ValueError(
@@ -230,9 +282,14 @@ class ExperimentalDataParser:
                 used_originals.add(orig)
                 assigned_canonicals.add(canonical)
 
-        # Pass 2 — positional fallback for leftover columns / fields
+        # Pass 2 — positional fallback ONLY for unmatched *required* fields.
+        # Optional fields (e.g. parent_plasmid_variant) are intentionally excluded:
+        # if they can't be found by name they should stay absent, not silently
+        # consume the first unrecognised / extra-metadata column.
         remaining_originals = [c for c in df_columns if c not in used_originals]
-        remaining_canonicals = [f for f in self._all_field_names if f not in assigned_canonicals]
+        remaining_canonicals = [
+            f for f in self._required_field_names if f not in assigned_canonicals
+        ]
         for orig, canonical in zip(remaining_originals, remaining_canonicals):
             mapping[orig] = canonical
             assigned_canonicals.add(canonical)

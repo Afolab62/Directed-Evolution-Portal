@@ -14,7 +14,8 @@ from .plasmid_validation import find_wt_in_plasmid
 from .uniprot_client import (
     UniProtError,
     fetch_uniprot_fasta,
-    fetch_uniprot_features_json,
+    fetch_uniprot_features_json,  # noqa: F401 – imported so tests can monkeypatch
+    fetch_uniprot_protein_metadata,
 )
 
 DEFAULT_VALIDATION_CACHE = Path("instance") / "validation_cache"

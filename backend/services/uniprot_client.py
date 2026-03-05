@@ -165,3 +165,95 @@ def fetch_uniprot_record(accession: str, *, fetch_features: bool = True, timeout
     fasta = fetch_uniprot_fasta(accession, timeout_s=timeout_s, use_cache=use_cache)
     features = fetch_uniprot_features_json(accession, timeout_s=timeout_s, use_cache=use_cache) if fetch_features else None
     return UniProtRecord(accession=accession.strip(), fasta_text=fasta, features=features)
+
+
+# ----------------------------- Extended / detailed fetch ---------------------
+
+def _extract_go_terms(data: dict[str, Any]) -> list[dict[str, str]]:
+    """Extract GO term annotations from a UniProt JSON record."""
+    go_terms: list[dict[str, str]] = []
+    aspect_map = {"F": "molecular_function", "C": "cellular_component", "P": "biological_process"}
+    for ref in data.get("uniProtKBCrossReferences", []):
+        if ref.get("database") != "GO":
+            continue
+        go_id = ref.get("id", "")
+        term_name = ""
+        aspect = ""
+        for prop in ref.get("properties", []):
+            if prop.get("key") == "GoTerm":
+                raw = prop.get("value", "")
+                if len(raw) >= 2 and raw[1] == ":":
+                    aspect = aspect_map.get(raw[0], raw[0])
+                    term_name = raw[2:]
+                else:
+                    term_name = raw
+        if go_id:
+            go_terms.append({"id": go_id, "term": term_name, "aspect": aspect})
+    return go_terms
+
+
+_DETAIL_DATABASES = frozenset((
+    "PDB", "InterPro", "Pfam", "AlphaFoldDB", "KEGG",
+    "RefSeq", "Ensembl", "PANTHER", "Reactome",
+))
+
+
+def fetch_uniprot_detailed(
+    accession: str,
+    timeout_s: float = 15.0,
+    use_cache: bool = True,
+) -> dict[str, Any]:
+    """
+    Return enriched protein data including cross-references, GO terms, PDB
+    structure IDs, AlphaFold ID, InterPro/Pfam domains, KEGG IDs, keywords,
+    taxonomy lineage, and gene names.  Built on top of the standard JSON
+    fetch — no extra HTTP request is needed.
+    """
+    data = fetch_uniprot_protein_metadata(accession, timeout_s=timeout_s, use_cache=use_cache)
+
+    # --- Cross-references grouped by database ---
+    crossrefs_raw: dict[str, list[str]] = {}
+    for ref in data.get("uniProtKBCrossReferences", []):
+        db = ref.get("database", "")
+        ref_id = ref.get("id", "")
+        if db and ref_id:
+            crossrefs_raw.setdefault(db, []).append(ref_id)
+
+    crossrefs = {db: ids for db, ids in crossrefs_raw.items() if db in _DETAIL_DATABASES}
+
+    # --- GO terms ---
+    go_terms = _extract_go_terms(data)
+
+    # --- Keywords ---
+    keywords = [kw.get("name", "") for kw in data.get("keywords", []) if kw.get("name")]
+
+    # --- Gene names (primary + synonyms) ---
+    gene_names: list[str] = []
+    for gene in data.get("genes", []):
+        if "geneName" in gene:
+            gene_names.append(gene["geneName"].get("value", ""))
+        for syn in gene.get("synonyms", []):
+            val = syn.get("value", "")
+            if val:
+                gene_names.append(val)
+
+    # --- Taxonomy lineage ---
+    # UniProt REST API returns lineage as a list of strings
+    lineage = [
+        (t if isinstance(t, str) else t.get("scientificName", ""))
+        for t in data.get("organism", {}).get("lineage", [])
+        if t
+    ]
+
+    return {
+        "pdb_ids":           crossrefs.get("PDB", []),
+        "alphafold_id":      (crossrefs.get("AlphaFoldDB") or [None])[0],
+        "interpro_ids":      crossrefs.get("InterPro", []),
+        "pfam_ids":          crossrefs.get("Pfam", []),
+        "kegg_ids":          crossrefs.get("KEGG", []),
+        "go_terms":          go_terms,
+        "keywords":          keywords,
+        "gene_names":        gene_names,
+        "taxonomy_lineage":  lineage,
+        "crossrefs":         crossrefs,
+    }

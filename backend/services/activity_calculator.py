@@ -1,6 +1,5 @@
 """
-Service for calculating activity scores for experimental variants.
-Based on requirement 4b from the briefing with corrected edge case handling.
+Service for calculating activity scores for experimental variants with corrected edge case handling.
 
 Activity Score = (DNA yield / DNA baseline) / (Protein yield / Protein baseline)
 

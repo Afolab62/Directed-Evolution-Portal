@@ -13,7 +13,6 @@ import { Button } from "@/components/ui/button";
 import { Mountain, Loader2, AlertCircle, RefreshCw } from "lucide-react";
 import type { VariantData } from "@/lib/types";
 
-// Plotly must be dynamically imported — browser-only
 const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
 
 interface ActivityLandscapeProps {
@@ -23,23 +22,41 @@ interface ActivityLandscapeProps {
 
 type Method = "pca" | "tsne" | "umap";
 
-interface LandscapeData {
-  x: number[][];
-  y: number[][];
-  z: number[][];
-  scatter_points: { x: number[]; y: number[]; z: number[] };
-  method: Method;
+interface LandscapeResponse {
+  success: boolean;
+  error?: string;
+  figure: {
+    data: Plotly.Data[];
+    layout: Partial<Plotly.Layout>;
+    frames?: Plotly.Frame[];
+  };
   variant_count: number;
+  method: Method;
 }
 
 export function ActivityLandscape({
   variants,
   experimentId,
 }: ActivityLandscapeProps) {
-  const [data, setData] = useState<LandscapeData | null>(null);
+  const [response, setResponse] = useState<LandscapeResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [method, setMethod] = useState<Method>("pca");
+
+  // Track Plotly's internal figure state so slider drags, play/stop presses,
+  // and legend clicks are not clobbered by React re-renders.
+  const [figData, setFigData] = useState<Plotly.Data[]>([]);
+  const [figLayout, setFigLayout] = useState<Partial<Plotly.Layout>>({});
+  const [figFrames, setFigFrames] = useState<Plotly.Frame[]>([]);
+
+  // Whenever a fresh landscape is fetched, seed the tracked state.
+  useEffect(() => {
+    if (response?.figure) {
+      setFigData(response.figure.data);
+      setFigLayout({ ...response.figure.layout, autosize: true });
+      setFigFrames(response.figure.frames ?? []);
+    }
+  }, [response]);
 
   const fetchLandscape = async (selectedMethod: Method) => {
     setLoading(true);
@@ -49,10 +66,10 @@ export function ActivityLandscape({
         `${process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000"}/api/experiments/${experimentId}/landscape?method=${selectedMethod}`,
         { credentials: "include" },
       );
-      const json = await res.json();
+      const json: LandscapeResponse = await res.json();
       if (!json.success)
         throw new Error(json.error ?? "Failed to load landscape");
-      setData(json);
+      setResponse(json);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Unknown error");
     } finally {
@@ -61,9 +78,7 @@ export function ActivityLandscape({
   };
 
   useEffect(() => {
-    if (experimentId && variants.length >= 3) {
-      fetchLandscape(method);
-    }
+    if (experimentId && variants.length >= 3) fetchLandscape(method);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [experimentId]);
 
@@ -90,6 +105,7 @@ export function ActivityLandscape({
       v.proteinSequence ||
       (v.mutationCount !== undefined && v.mutationCount > 0),
   ).length;
+
   if (analysedCount < 3) {
     return (
       <Card>
@@ -117,10 +133,10 @@ export function ActivityLandscape({
               Activity Landscape
             </CardTitle>
             <CardDescription>
-              3D topographic surface — peaks represent highly active variants
+              3D topographic surface — peaks represent highly active variants.
+              Use the play buttons and slider to animate across generations.
             </CardDescription>
           </div>
-
           <div className="flex items-center gap-2">
             {(["pca", "tsne", "umap"] as Method[]).map((m) => (
               <Button
@@ -133,7 +149,7 @@ export function ActivityLandscape({
                 {m.toUpperCase()}
               </Button>
             ))}
-            {data && (
+            {response && (
               <Button
                 size="sm"
                 variant="ghost"
@@ -151,7 +167,7 @@ export function ActivityLandscape({
         {loading && (
           <div className="flex items-center justify-center h-64 text-muted-foreground">
             <Loader2 className="h-6 w-6 animate-spin mr-2" />
-            Computing {method.toUpperCase()} landscape...
+            Computing {method.toUpperCase()} landscape…
           </div>
         )}
 
@@ -171,65 +187,33 @@ export function ActivityLandscape({
           </div>
         )}
 
-        {data && !loading && (
+        {response && !loading && (
           <>
             <p className="text-xs text-muted-foreground mb-2">
-              {data.variant_count} variants · {data.method.toUpperCase()}{" "}
-              projection
+              {response.variant_count} variants ·{" "}
+              {response.method.toUpperCase()} projection · use ▶ buttons or
+              slider below to animate generations
             </p>
             <Plot
-              data={[
-                {
-                  type: "surface" as const,
-                  x: data.x,
-                  y: data.y,
-                  z: data.z,
-                  colorscale: "Viridis",
-                  colorbar: { title: { text: "Activity" } },
-                  opacity: 0.85,
-                  contours: {
-                    z: {
-                      show: true,
-                      usecolormap: true,
-                      project: { z: true },
-                    },
-                  } as any,
-                },
-                {
-                  type: "scatter3d" as const,
-                  x: data.scatter_points.x,
-                  y: data.scatter_points.y,
-                  z: data.scatter_points.z,
-                  mode: "markers" as const,
-                  marker: {
-                    size: 3,
-                    color: data.scatter_points.z,
-                    colorscale: "Viridis",
-                    opacity: 0.9,
-                  },
-                  name: "Variants",
-                },
-              ]}
-              layout={{
-                autosize: true,
-                height: 560,
-                scene: {
-                  xaxis: { title: { text: "PC1" } },
-                  yaxis: { title: { text: "PC2" } },
-                  zaxis: { title: { text: "Activity Score" } },
-                  camera: { eye: { x: 1.5, y: 1.5, z: 1.2 } },
-                },
-                margin: { l: 0, r: 0, t: 0, b: 0 },
-                paper_bgcolor: "rgba(0,0,0,0)",
-                plot_bgcolor: "rgba(0,0,0,0)",
+              data={figData}
+              layout={figLayout}
+              frames={figFrames}
+              onInitialized={(fig) => {
+                setFigData(fig.data as Plotly.Data[]);
+                setFigLayout(fig.layout as Partial<Plotly.Layout>);
+              }}
+              onUpdate={(fig) => {
+                setFigData(fig.data as Plotly.Data[]);
+                setFigLayout(fig.layout as Partial<Plotly.Layout>);
               }}
               config={{ responsive: true, displayModeBar: true }}
               style={{ width: "100%" }}
+              useResizeHandler
             />
           </>
         )}
 
-        {!data && !loading && !error && (
+        {!response && !loading && !error && (
           <div className="flex items-center justify-center h-40">
             <p className="text-muted-foreground text-sm">
               Click a method above to compute the landscape

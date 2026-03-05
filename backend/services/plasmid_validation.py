@@ -227,6 +227,18 @@ def _best_fuzzy_identity(hay: str, needle: str) -> Tuple[float, int]:
     return best_id, best_i
 
 
+def _first_mismatch_info(window: str, needle: str) -> str:
+    """
+    Return a human-readable description of the first substitution mismatch
+    between *window* (plasmid-translated slice) and *needle* (WT sequence).
+    Skips positions where either character is 'X' (ambiguous codon).
+    """
+    for i, (a, b) in enumerate(zip(window, needle)):
+        if a != b and a != "X" and b != "X":
+            return f"AA pos {i + 1} (WT: {b}, found: {a})"
+    return "no single-residue substitution mismatch (possible indel or length difference)"
+
+
 # ----------------------------
 # Smith–Waterman local alignment
 # ----------------------------
@@ -427,6 +439,7 @@ def find_wt_in_plasmid(
     min_wt_len: int = 30,
     fuzzy_fallback: bool = True,
     min_identity: float = 0.95,
+    max_fuzzy_plasmid_len: int = 100_000,
     align_min_identity: float = 0.90,
     align_min_coverage: float = 0.95,
     codon_table: Optional[Dict[str, str]] = None,
@@ -456,6 +469,7 @@ def find_wt_in_plasmid(
         "params": {
             "min_wt_len": min_wt_len,
             "min_identity": min_identity,
+            "max_fuzzy_plasmid_len": max_fuzzy_plasmid_len,
             "align_min_identity": align_min_identity,
             "align_min_coverage": align_min_coverage,
             "max_align_wt_len": max_align_wt_len,
@@ -564,57 +578,77 @@ def find_wt_in_plasmid(
     # ----------------------------
     # B) Fuzzy window identity (substitutions only)
     # ----------------------------
-    # fuzzy fallback handles variants with point mutations relative to WT —
-    # a 95% identity threshold allows up to ~5% substitution while still
-    # confirming the correct gene is present rather than a random sequence
+    near_miss_fuzzy: Optional[dict] = None  # best candidate that didn't reach min_identity
     if best is None and fuzzy_fallback:
         fuzzy_best: Optional[_Candidate] = None
-        for k, aa_seq in frames.items():
-            strand, frame = _frame_key_to_strand_frame(k)
-            best_id, best_i = _best_fuzzy_identity(aa_seq, wt)
-            base_diag["top_fuzzy_candidates"].append(
-                {
-                    "frame": k,
-                    "best_identity": round(best_id, 6),
-                    "passed": bool(best_id >= min_identity),
-                    "used_x_wildcard": ("X" in aa_seq) or ("X" in wt),
-                }
-            )
-            if best_i == -1:
-                continue
-            if best_id >= min_identity:
-                if strand == "+":
-                    nt_start2 = frame + best_i * 3
-                    nt_end2 = nt_start2 + length_nt
-                    start_nt, end_nt_exclusive, wraps_origin = _map_plus_nt_coords(L, nt_start2, length_nt)
-                else:
-                    nt_start_rev2 = frame + best_i * 3
-                    start_nt, end_nt_exclusive, wraps_origin, nt_start2 = _map_minus_nt_coords(L, len(dna2), nt_start_rev2, length_nt)
-                    nt_end2 = nt_start2 + length_nt
-
-                score = _orf_context_score(dna, strand, start_nt, end_nt_exclusive)
-
-                cand = _Candidate(
-                    strand=strand,
-                    frame=frame,
-                    frame_key=k,
-                    aa_index=best_i,
-                    nt_start2=nt_start2,
-                    nt_end2=nt_end2,
-                    wraps_origin=wraps_origin,
-                    score=score,
-                    match_type="fuzzy",
-                    identity=best_id,
-                    coverage=1.0,
-                    notes=f"Fuzzy match accepted in frame {strand}{frame}: identity={best_id:.3f} >= {min_identity:.3f}. start2={nt_start2}, end2={nt_end2}.",
+        # Large-plasmid fast-path: the O(L×M) sliding-window scan is
+        # impractical beyond max_fuzzy_plasmid_len.  Skip it and fall through
+        # to Smith–Waterman (guarded separately by its own size limits).
+        if len(dna) > max_fuzzy_plasmid_len:
+            base_diag["fuzzy_skipped"] = {
+                "reason": (
+                    f"Plasmid ({len(dna):,} nt) exceeds max_fuzzy_plasmid_len "
+                    f"({max_fuzzy_plasmid_len:,} nt).  Fuzzy O(L×M) window "
+                    "scan skipped to avoid timeout; proceeding to alignment."
+                ),
+                "plasmid_len": len(dna),
+                "max_fuzzy_plasmid_len": max_fuzzy_plasmid_len,
+            }
+        else:
+            for k, aa_seq in frames.items():
+                strand, frame = _frame_key_to_strand_frame(k)
+                best_id, best_i = _best_fuzzy_identity(aa_seq, wt)
+                base_diag["top_fuzzy_candidates"].append(
+                    {
+                        "frame": k,
+                        "best_identity": round(best_id, 6),
+                        "passed": bool(best_id >= min_identity),
+                        "used_x_wildcard": ("X" in aa_seq) or ("X" in wt),
+                    }
                 )
-                if (fuzzy_best is None) or (cand.identity > fuzzy_best.identity) or (cand.identity == fuzzy_best.identity and cand.score > fuzzy_best.score):
-                    fuzzy_best = cand
+                if best_i == -1:
+                    continue
+                if best_id >= min_identity:
+                    if strand == "+":
+                        nt_start2 = frame + best_i * 3
+                        nt_end2 = nt_start2 + length_nt
+                        start_nt, end_nt_exclusive, wraps_origin = _map_plus_nt_coords(L, nt_start2, length_nt)
+                    else:
+                        nt_start_rev2 = frame + best_i * 3
+                        start_nt, end_nt_exclusive, wraps_origin, nt_start2 = _map_minus_nt_coords(L, len(dna2), nt_start_rev2, length_nt)
+                        nt_end2 = nt_start2 + length_nt
 
-        # keep only a few diagnostic summaries
-        base_diag["top_fuzzy_candidates"] = sorted(
-            base_diag["top_fuzzy_candidates"], key=lambda d: d["best_identity"], reverse=True
-        )[:3]
+                    score = _orf_context_score(dna, strand, start_nt, end_nt_exclusive)
+
+                    cand = _Candidate(
+                        strand=strand,
+                        frame=frame,
+                        frame_key=k,
+                        aa_index=best_i,
+                        nt_start2=nt_start2,
+                        nt_end2=nt_end2,
+                        wraps_origin=wraps_origin,
+                        score=score,
+                        match_type="fuzzy",
+                        identity=best_id,
+                        coverage=1.0,
+                        notes=f"Fuzzy match accepted in frame {strand}{frame}: identity={best_id:.3f} >= {min_identity:.3f}. start2={nt_start2}, end2={nt_end2}.",
+                    )
+                    if (fuzzy_best is None) or (cand.identity > fuzzy_best.identity) or (cand.identity == fuzzy_best.identity and cand.score > fuzzy_best.score):
+                        fuzzy_best = cand
+                elif best_i != -1 and (near_miss_fuzzy is None or best_id > near_miss_fuzzy["identity"]):
+                    # Below threshold but best seen so far — keep for diagnostics
+                    near_miss_fuzzy = {
+                        "frame": k,
+                        "identity": best_id,
+                        "aa_start": best_i,
+                        "window": aa_seq[best_i: best_i + len(wt)],
+                    }
+
+            # keep only a few diagnostic summaries
+            base_diag["top_fuzzy_candidates"] = sorted(
+                base_diag["top_fuzzy_candidates"], key=lambda d: d["best_identity"], reverse=True
+            )[:3]
 
         best = fuzzy_best
 
@@ -728,7 +762,13 @@ def find_wt_in_plasmid(
             notes=(
                 f"No exact match found. "
                 f"Fuzzy fallback did not reach threshold (min_identity={min_identity:.2f}). "
-                f"No alignment match met thresholds (identity>={align_min_identity:.2f}, coverage>={align_min_coverage:.2f})."
+                + (
+                    f"Best fuzzy attempt: frame {near_miss_fuzzy['frame']}, "
+                    f"identity={near_miss_fuzzy['identity']:.3f}, "
+                    f"first mismatch at {_first_mismatch_info(near_miss_fuzzy['window'], wt)}. "
+                    if near_miss_fuzzy else ""
+                )
+                + f"No alignment match met thresholds (identity>={align_min_identity:.2f}, coverage>={align_min_coverage:.2f})."
             ),
             diagnostics=base_diag,
         )

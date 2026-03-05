@@ -1,91 +1,63 @@
 """
-Staging routes: UniProt accession + plasmid FASTA upload + validation.
+Staging blueprint
+
+Provides the HTTP interface for the experiment staging workflow:
+  POST /staging/api/staging   →  fetch UniProt WT + validate plasmid
 """
-from pathlib import Path
-import logging
+from __future__ import annotations
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, request, jsonify
 
-from services.staging import stage_experiment_validate_plasmid
+# Import so that tests can monkeypatch `staging_routes.stage_experiment_validate_plasmid`
+from services.staging import stage_experiment_validate_plasmid  # noqa: F401
 
 staging_bp = Blueprint("staging", __name__, url_prefix="/staging")
-logger = logging.getLogger(__name__)
-
-
-def _get_plasmid_fasta_from_request() -> str:
-    """Extract plasmid FASTA text from multipart file upload or form field."""
-    plasmid_fasta = request.form.get("plasmid_fasta", "").strip()
-    uploaded = request.files.get("plasmid_file")
-    if uploaded and uploaded.filename:
-        plasmid_fasta = uploaded.read().decode("utf-8")
-    return plasmid_fasta
-
-
-@staging_bp.post("/")
-def staging_submit():
-    """
-    Form-data or multipart submission.
-    Accepts: accession (str), plasmid_fasta (str) or plasmid_file (file), fetch_features (bool).
-    Returns JSON validation result.
-    """
-    accession = request.form.get("accession", "").strip()
-    fetch_features = bool(request.form.get("fetch_features", True))
-    plasmid_fasta = _get_plasmid_fasta_from_request()
-
-    if not accession or not plasmid_fasta:
-        return jsonify({"error": "accession and plasmid_fasta are required"}), 400
-
-    result = stage_experiment_validate_plasmid(
-        accession=accession,
-        plasmid_fasta_text=plasmid_fasta,
-        fetch_features=fetch_features,
-    )
-
-    logger.info(
-        "staging_submit accession=%s valid=%s match_type=%s",
-        accession,
-        (result.get("validation") or {}).get("is_valid"),
-        (result.get("validation") or {}).get("match_type"),
-    )
-
-    return jsonify(result), 200
 
 
 @staging_bp.post("/api/staging")
-def staging_api():
+def staging_validate():
     """
-    JSON API endpoint for staging.
-    Expects: {accession, plasmid_fasta, fetch_features?}
-    Returns: {accession, wt_protein, wt_plasmid_seq, features, validation, error}
+    Validate that a plasmid encodes a UniProt WT protein.
+
+    Request JSON body:
+      accession      (str, required) — UniProt accession, e.g. "O34996"
+      plasmid_fasta  (str, required) — FASTA text of the plasmid DNA
+      fetch_features (bool, optional, default true)
+
+    Response 200:
+      {accession, wt_protein, features, validation, error}
+    Response 400:
+      {error: "..."}
     """
-    data = request.get_json(silent=True) or {}
-    accession = str(data.get("accession", "")).strip()
-    plasmid_fasta = str(data.get("plasmid_fasta", "")).strip()
-    fetch_features = bool(data.get("fetch_features", True))
+    # Hard cap: ~4 Mbp is far beyond any real expression vector (typical: 2–20 kbp).
+    # Larger inputs risk timeouts in six-frame translation + fuzzy scan.
+    _MAX_PLASMID_BYTES = 4_000_000
+
+    body = request.get_json(silent=True) or {}
+
+    accession: str = (body.get("accession") or "").strip()
+    plasmid_fasta: str = (body.get("plasmid_fasta") or "").strip()
+    fetch_features: bool = bool(body.get("fetch_features", True))
 
     if not accession or not plasmid_fasta:
         return jsonify({"error": "accession and plasmid_fasta are required"}), 400
 
-    result = stage_experiment_validate_plasmid(
-        accession=accession,
-        plasmid_fasta_text=plasmid_fasta,
+    if len(plasmid_fasta) > _MAX_PLASMID_BYTES:
+        return jsonify({
+            "error": (
+                f"Plasmid FASTA is too large ({len(plasmid_fasta):,} characters). "
+                f"Maximum supported size is {_MAX_PLASMID_BYTES:,} characters "
+                f"(\u2248{_MAX_PLASMID_BYTES // 1_000:,}\u202fkbp). "
+                "Please ensure you have uploaded the correct file."
+            )
+        }), 413
+
+    # Allow tests (and the route itself) to monkeypatch this module-level name
+    import routes.staging as _self
+    result = _self.stage_experiment_validate_plasmid(
+        accession,
+        plasmid_fasta,
         fetch_features=fetch_features,
     )
 
-    logger.info(
-        "staging_api accession=%s valid=%s match_type=%s",
-        accession,
-        (result.get("validation") or {}).get("is_valid"),
-        (result.get("validation") or {}).get("match_type"),
-    )
-
     return jsonify(result), 200
-
-
-@staging_bp.get("/example")
-def staging_example():
-    """Return example plasmid FASTA text for quick demos."""
-    example_path = Path("data") / "pET-28a_BSU_DNA_Pol_I_WT.fa"
-    if not example_path.exists():
-        return jsonify({"error": "Example FASTA not found"}), 404
-    return jsonify({"fasta": example_path.read_text(encoding="utf-8")}), 200

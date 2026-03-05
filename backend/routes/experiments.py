@@ -1,9 +1,12 @@
-from flask import Blueprint, request, jsonify, session
+from flask import Blueprint, request, jsonify, session, send_file, Response
+import io
+import matplotlib
+matplotlib.use('Agg')  # headless backend — must be set before any pyplot import
 from services.experiment_service import experiment_service
 from services.experimental_data_parser import parser
 from services.activity_calculator import activity_calculator
 from services.sequence_analyzer import sequence_analyzer
-from services.fingerprint_plot import resolve_structure, build_3d_fingerprint
+from services.fingerprint_plot import resolve_structure, build_3d_fingerprint, build_linear_fingerprint
 from services.uniprot_client import fetch_uniprot_features_json
 from models.experiment import Experiment, VariantData, Mutation, safe_float
 from database import db
@@ -73,7 +76,7 @@ def create_experiment():
                     'If you have a raw DNA sequence, add a header line such as ">MyPlasmid" before it.'
                 )
             }), 400
-
+# If data doesn't have > header, it is not a valid file so will not be accepted
         dna_chars = set()
         for ln in plasmid_sequence.splitlines():
             if not ln.strip().startswith('>'):
@@ -236,6 +239,46 @@ def delete_experiment(experiment_id: str):
         return jsonify({'success': False, 'error': 'Server error'}), 500
 
 
+@experiments_bp.route('/<experiment_id>/preview-mapping', methods=['POST'])
+def preview_column_mapping(experiment_id: str):
+    """
+    Preview the auto-detected column mapping for an uploaded file without
+    persisting any data.  Used by the frontend mapping-confirmation step.
+
+    Request JSON body:
+      data    (str) — raw file text
+      format  (str) — "tsv" or "json"
+
+    Response 200:
+      {
+        success: true,
+        raw_columns: [...],
+        column_mapping: {raw: canonical, ...},
+        metadata_columns: [...],
+        missing_required: [...],
+        canonical_fields: [...],
+      }
+    """
+    user_id = require_auth()
+    if not user_id:
+        return jsonify({'success': False, 'error': 'Not authenticated'}), 401
+
+    body = request.get_json(silent=True) or {}
+    file_content: str = body.get('data', '')
+    file_format: str = body.get('format', 'tsv').lower()
+
+    if not file_content:
+        return jsonify({'success': False, 'error': 'No file content provided'}), 400
+
+    try:
+        preview = parser.preview_mapping(file_content, file_format)
+        return jsonify({'success': True, **preview}), 200
+    except ValueError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
+    except Exception:
+        return jsonify({'success': False, 'error': 'Failed to parse file header'}), 500
+
+
 @experiments_bp.route('/<experiment_id>/upload-data', methods=['POST'])
 def upload_experimental_data(experiment_id: str):
     """
@@ -261,6 +304,8 @@ def upload_experimental_data(experiment_id: str):
         data = request.get_json()
         file_content = data.get('data', '')
         file_format = data.get('format', 'tsv').lower()
+        # Optional user-confirmed mapping from the frontend review step
+        column_mapping_override = data.get('column_mapping') or None
         
         if not file_content:
             return jsonify({'success': False, 'error': 'No file content provided'}), 400
@@ -305,7 +350,10 @@ def upload_experimental_data(experiment_id: str):
 
         # Step 1: Parse and validate the data
         try:
-            valid_df, control_df, rejected_df, parse_summary = parser.process_file(file_content, file_format)
+            valid_df, control_df, rejected_df, parse_summary = parser.process_file(
+                file_content, file_format,
+                column_mapping_override=column_mapping_override,
+            )
             print(f"Parsed: {parse_summary['valid_rows']} valid, {parse_summary['control_rows']} controls, {parse_summary['rejected_rows']} rejected")
         except ValueError as e:
             print(f"Parse error: {e}")
@@ -316,7 +364,17 @@ def upload_experimental_data(experiment_id: str):
                 'success': False,
                 'error': 'No data rows could be parsed from the file.'
             }), 400
-        
+
+        if control_df.empty:
+            return jsonify({
+                'success': False,
+                'error': (
+                    'No control rows were found in the uploaded data. '
+                    'At least one row must be marked as a control '
+                    '(is_control = TRUE / 1) before activity scores can be calculated.'
+                )
+            }), 400
+
         # Step 2: Calculate activity scores (using both valid variants and controls)
         print("Step 2: Calculating activity scores...")
         try:
@@ -367,18 +425,27 @@ def upload_experimental_data(experiment_id: str):
                 qc_message=None
             )
             
-            # Store extra metadata
+            # Store extra metadata — coerce NaN/inf to None so the dict is
+            # always JSON-serialisable before SQLAlchemy writes it to JSONB.
             if metadata_columns:
-                metadata = {col: variant_data.get(col) for col in metadata_columns if col in variant_data}
-                variant.extra_metadata = metadata
+                import math as _math
+                metadata = {}
+                for col in metadata_columns:
+                    if col not in variant_data:
+                        continue
+                    val = variant_data[col]
+                    if isinstance(val, float) and (_math.isnan(val) or _math.isinf(val)):
+                        val = None
+                    metadata[col] = val
+                variant.extra_metadata = metadata or None
             
             # Store mutations using relationship (SQLAlchemy will handle variant_id)
             for mut in variant_data.get('mutations', []):
                 mutation = Mutation(
                     position=mut['position'],
-                    wild_type=mut['wild_type'],
-                    mutant=mut['mutant'],
-                    mutation_type=mut['type'],
+                    wild_type=mut['wt_aa'],
+                    mutant=mut['mut_aa'],
+                    mutation_type=mut.get('mutation_type', 'non-synonymous'),
                     generation_introduced=variant_data['generation']  # Simplified
                 )
                 variant.mutations.append(mutation)
@@ -498,7 +565,13 @@ def get_top_performers(experiment_id: str):
         ).order_by(
             VariantData.activity_score.desc()
         ).limit(limit).all()
-        
+
+        # ── Debug: log mutation counts so we can verify DB state ──────────────
+        for v in variants:
+            mut_list = v.mutations if include_mutations else []
+            print(f"[TOP] variant pvi={v.plasmid_variant_index} gen={v.generation} "
+                  f"mutations={len(mut_list)} activity={v.activity_score:.3f}")
+
         return jsonify({
             'success': True,
             'topPerformers': [v.to_dict(include_sequences=True, include_mutations=include_mutations) for v in variants]
@@ -662,9 +735,7 @@ def get_mutation_fingerprint_3d(experiment_id: str, variant_id: str):
                 VariantData.id,
                 VariantData.plasmid_variant_index,
                 VariantData.parent_plasmid_variant,
-                VariantData.generation,
-                VariantData.activity_score,
-                VariantData.protein_sequence,
+      VariantData.protein_sequence,
             )
             .filter(VariantData.experiment_id == exp_uuid)
             .all()
@@ -752,8 +823,9 @@ def get_mutation_fingerprint_3d(experiment_id: str, variant_id: str):
             except Exception:
                 pass
 
-        # ── 8. Build Plotly figure and return as JSON ────────────────────────
+        # ── 8. Build Plotly figure ────────────────────────────────────────────
         variant_pvi = selected_light.plasmid_variant_index
+        highlight_position = request.args.get('highlight', type=int)
         fig = build_3d_fingerprint(
             lineage_mutations=mutations,
             backbone=backbone,
@@ -762,7 +834,17 @@ def get_mutation_fingerprint_3d(experiment_id: str, variant_id: str):
             uniprot_id=uniprot_id,
             structure_source=structure_info.get('source', structure_info.get('status', 'Structure')),
             feature_annotations=feature_annotations,
+            highlight_position=highlight_position,
         )
+
+        # ?format=html → self-contained interactive HTML (no react-plotly.js needed)
+        if request.args.get('format') == 'html':
+            html = fig.to_html(include_plotlyjs='cdn', full_html=True, config={
+                'responsive': True,
+                'modeBarButtonsToRemove': ['select2d', 'lasso2d'],
+            })
+            return Response(html, mimetype='text/html')
+
         import json as _json
         fig_json = _json.loads(fig.to_json())
 
@@ -778,6 +860,162 @@ def get_mutation_fingerprint_3d(experiment_id: str, variant_id: str):
             'numNonSynonymous': num_nonsynonymous,
             'structureStatus': structure_info.get('status', ''),
             'lineageLength': len(lineage),
+        }), 200
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': 'Server error'}), 500
+
+
+@experiments_bp.route('/<experiment_id>/fingerprint_linear/<variant_id>', methods=['GET'])
+def get_mutation_fingerprint_linear(experiment_id: str, variant_id: str):
+    """
+    Return a Plotly JSON figure for the linear mutation fingerprint.
+    Triangles on a horizontal backbone, one colour per generation.
+    """
+    user_id = require_auth()
+    if not user_id:
+        return jsonify({'success': False, 'error': 'Not authenticated'}), 401
+
+    try:
+        experiment = experiment_service.get_experiment_by_id(experiment_id, user_id)
+        if not experiment:
+            return jsonify({'success': False, 'error': 'Experiment not found'}), 404
+
+        exp_uuid = uuid.UUID(experiment_id)
+        var_uuid = uuid.UUID(variant_id)
+
+        wt_protein_len = len((experiment.wt_protein_sequence or '').strip()) or 500
+
+        # Lightweight variant rows for lineage walk
+        all_light = (
+            db.query(
+                VariantData.id,
+                VariantData.plasmid_variant_index,
+                VariantData.parent_plasmid_variant,
+                VariantData.generation,
+                VariantData.activity_score,
+            )
+            .filter(VariantData.experiment_id == exp_uuid)
+            .all()
+        )
+        by_pvi = {r.plasmid_variant_index: r for r in all_light}
+        by_id  = {r.id: r for r in all_light}
+
+        selected_light = by_id.get(var_uuid)
+        if not selected_light:
+            return jsonify({'success': False, 'error': 'Variant not found'}), 404
+
+        # Lineage walk
+        lineage_pvs = []
+        current = selected_light
+        visited: set = set()
+        while current is not None and current.plasmid_variant_index not in visited:
+            visited.add(current.plasmid_variant_index)
+            lineage_pvs.append(current)
+            parent_pvi = current.parent_plasmid_variant
+            current = by_pvi.get(parent_pvi) if parent_pvi is not None and parent_pvi >= 0 else None
+        lineage_pvs.sort(key=lambda r: r.generation)
+
+        # Load mutations for the lineage
+        lineage_ids = [r.id for r in lineage_pvs]
+        lineage_variants = (
+            db.query(VariantData)
+            .filter(VariantData.id.in_(lineage_ids))
+            .options(joinedload(VariantData.mutations))
+            .all()
+        )
+        lineage_by_id = {v.id: v for v in lineage_variants}
+        lineage = [lineage_by_id[r.id] for r in lineage_pvs if r.id in lineage_by_id]
+
+        # Delta walk — collect mutations introduced at each generation
+        all_mutations_raw = {}
+        prev_keys: set = set()
+        for step in lineage:
+            step_keys = {
+                (m.position, m.wild_type, m.mutant, m.mutation_type)
+                for m in (step.mutations or [])
+            }
+            new_keys = step_keys - prev_keys
+            for m in (step.mutations or []):
+                key = (m.position, m.wild_type, m.mutant, m.mutation_type)
+                if key in new_keys and key not in all_mutations_raw:
+                    all_mutations_raw[key] = {
+                        'position': m.position,
+                        'wt_aa': m.wild_type,
+                        'mut_aa': m.mutant,
+                        'mutation_type': m.mutation_type,
+                        'wt_codon': m.wt_codon or 'n/a',
+                        'mut_codon': m.mut_codon or 'n/a',
+                        'aa_change': f"{m.wild_type}{m.position}{m.mutant}",
+                        'generation': step.generation,
+                    }
+            prev_keys = step_keys
+
+        mutations = sorted(all_mutations_raw.values(), key=lambda m: m['position'])
+
+        import json as _json
+        # Optional position window for zoomed / sliced views
+        _win_start = request.args.get('window_start', type=int)
+        _win_end   = request.args.get('window_end',   type=int)
+
+        fig = build_linear_fingerprint(
+            lineage_mutations=mutations,
+            wt_protein_len=wt_protein_len,
+            variant_id=selected_light.plasmid_variant_index,
+            window_start=_win_start,
+            window_end=_win_end,
+        )
+
+        # ?format=html → self-contained interactive HTML (no react-plotly.js needed)
+        if request.args.get('format') == 'html':
+            html = fig.to_html(include_plotlyjs='cdn', full_html=True, config={
+                'responsive': True,
+                'modeBarButtonsToRemove': ['select2d', 'lasso2d'],
+            })
+            # Inject a click handler that fires window.parent.postMessage when
+            # the user clicks a mutation triangle.  The parent React component
+            # listens for this message and auto-switches to the 3D tab with the
+            # selected residue highlighted.  Uses a retry loop so the handler
+            # attaches after Plotly.newPlot() has finished rendering.
+            _click_script = """<script>
+(function () {
+  function attach() {
+    var divs = document.querySelectorAll('.js-plotly-plot');
+    if (!divs.length) { setTimeout(attach, 150); return; }
+    divs.forEach(function (div) {
+      div.on('plotly_click', function (ev) {
+        if (!ev || !ev.points || !ev.points.length) return;
+        var pt = ev.points[0];
+        var pos = pt.x != null ? Math.round(pt.x) : null;
+        var label = pt.hovertext || null;
+        if (pos != null) {
+          window.parent.postMessage(
+            { type: 'dem_mutation_click', position: pos, label: label },
+            '*'
+          );
+        }
+      });
+    });
+  }
+  if (document.readyState === 'complete') { attach(); }
+  else { window.addEventListener('load', attach); }
+})();
+</script>"""
+            html = html.replace('</body>', _click_script + '\n</body>')
+            return Response(html, mimetype='text/html')
+
+        fig_json = _json.loads(fig.to_json())
+
+        return jsonify({
+            'success': True,
+            'figure': fig_json,
+            'plasmidVariantIndex': selected_light.plasmid_variant_index,
+            'generation': selected_light.generation,
+            'activityScore': safe_float(selected_light.activity_score),
+            'numMutations': len(mutations),
+            'wtProteinLen': wt_protein_len,
         }), 200
 
     except Exception as e:
@@ -919,7 +1157,7 @@ def _run_analysis_background(app, exp_id, wt_protein_seq: str, plasmid_seq: str)
 
                 this_muts: dict = {}
                 for mut in result.get('mutations', []):
-                    key = (mut['position'], mut['wild_type'], mut['mutant'])
+                    key = (mut['position'], mut['wt_aa'], mut['mut_aa'])
                     if key in parent_muts:
                         # Inherited — keep the generation it was first introduced
                         this_muts[key] = parent_muts[key]
@@ -928,17 +1166,12 @@ def _run_analysis_background(app, exp_id, wt_protein_seq: str, plasmid_seq: str)
                         this_muts[key] = v.generation
                 idx_to_mutations[v.plasmid_variant_index] = this_muts
 
-            # Bulk-delete all existing mutations in one round-trip
-            if variant_ids:
-                db.query(Mutation).filter(
-                    Mutation.variant_id.in_(variant_ids)
-                ).delete(synchronize_session=False)
-                db.commit()
-                print(f"[BG] Cleared existing mutations for {len(variant_ids)} variants")
-
-            # Update protein sequences and accumulate new Mutation objects
+            # ── Build new Mutation objects and protein updates (no DB writes yet) ────
+            # ALL computation completes before ANY destructive DB operation.
+            # This means a server restart or exception during analysis leaves the
+            # existing mutations intact — the old delete-first approach wiped them.
             new_mutations = []
-            updated_count = 0
+            protein_updates = {}   # variant_id -> new protein_sequence string
             BATCH_SIZE = 200
 
             for result in analyzed:
@@ -946,31 +1179,51 @@ def _run_analysis_background(app, exp_id, wt_protein_seq: str, plasmid_seq: str)
                 if not variant:
                     continue
 
-                variant.protein_sequence = result.get('protein_sequence')
-                updated_count += 1
+                protein_updates[result['id']] = result.get('protein_sequence')
 
                 gen_map = idx_to_mutations.get(variant.plasmid_variant_index, {})
                 for mut in result.get('mutations', []):
-                    key = (mut['position'], mut['wild_type'], mut['mutant'])
+                    key = (mut['position'], mut['wt_aa'], mut['mut_aa'])
                     gen_introduced = gen_map.get(key, variant.generation)
                     new_mutations.append(Mutation(
                         variant_id=variant.id,
                         position=mut['position'],
-                        wild_type=mut['wild_type'],
-                        mutant=mut['mutant'],
+                        wild_type=mut['wt_aa'],
+                        mutant=mut['mut_aa'],
                         wt_codon=mut.get('wt_codon'),
                         mut_codon=mut.get('mut_codon'),
                         mut_aa=mut.get('mut_aa'),
-                        mutation_type=mut.get('type', 'non-synonymous'),
+                        mutation_type=mut.get('mutation_type', 'non-synonymous'),
                         generation_introduced=gen_introduced
                     ))
 
-                # Flush a batch of protein-sequence updates periodically
-                if updated_count % BATCH_SIZE == 0:
-                    db.commit()
-                    print(f"[BG] Flushed protein sequences: {updated_count}/{len(analyzed)}")
+            print(f"[BG] Built {len(new_mutations)} mutations for {len(protein_updates)} variants — writing to DB...")
+
+            # ── Delete old mutations then insert new ones ─────────
+            # Both steps are in the same transaction so a crash leaves the DB in
+            # a consistent state (either fully old or fully new data).
+            updated_count = 0
+            if variant_ids:
+                deleted = db.query(Mutation).filter(
+                    Mutation.variant_id.in_(variant_ids)
+                ).delete(synchronize_session=False)
+                print(f"[BG] Deleted {deleted} old mutations")
+
+            for result_id, new_protein in protein_updates.items():
+                variant = variant_dict.get(result_id)
+                if variant:
+                    variant.protein_sequence = new_protein
+                    updated_count += 1
+                    # Flush protein-sequence updates in batches to keep memory low
+                    if updated_count % BATCH_SIZE == 0:
+                        db.flush()
+                        print(f"[BG] Flushed protein sequences: {updated_count}/{len(protein_updates)}")
+
             if new_mutations:
-                db.bulk_save_objects(new_mutations)
+                # add_all() is used instead of bulk_save_objects() — it respects
+                # the current transaction and fires ORM events correctly.
+                db.add_all(new_mutations)
+                print(f"[BG] Staged {len(new_mutations)} mutations for insert")
 
             db.commit()
             print(f"[BG] Database update complete: {updated_count} variants, {len(new_mutations)} mutations")
@@ -981,6 +1234,11 @@ def _run_analysis_background(app, exp_id, wt_protein_seq: str, plasmid_seq: str)
             traceback.print_exc()
             db.rollback()
             _set_analysis_status(exp_id, 'failed', f'Analysis failed: {str(e)}')
+        finally:
+            # Always release the scoped session for this thread back to the pool.
+            # Without this, the background-thread session stays in the registry
+            # and holds a DB connection open indefinitely.
+            db.remove()
 
 
 @experiments_bp.route('/<experiment_id>/analyze-sequences', methods=['POST'])
@@ -1032,3 +1290,191 @@ def analyze_sequences(experiment_id: str):
         traceback.print_exc()
         db.rollback()
         return jsonify({'success': False, 'error': f'Failed to start analysis: {str(e)}'}), 500
+
+
+@experiments_bp.route('/<experiment_id>/mutations/export', methods=['GET'])
+def export_mutations_csv(experiment_id: str):
+    """
+    Stream a CSV of all mutations for an experiment.
+    Columns: variant_index, generation, position, wt_aa, mut_aa,
+             wt_codon, mut_codon, mutation_type, aa_change, generation_introduced
+    """
+    user_id = require_auth()
+    if not user_id:
+        return jsonify({'success': False, 'error': 'Not authenticated'}), 401
+
+    try:
+        experiment = experiment_service.get_experiment_by_id(experiment_id, user_id)
+        if not experiment:
+            return jsonify({'success': False, 'error': 'Experiment not found'}), 404
+
+        exp_uuid = uuid.UUID(experiment_id) if isinstance(experiment_id, str) else experiment_id
+
+        # Load all variants + mutations in one query to avoid N+1
+        from sqlalchemy.orm import joinedload as _jl
+        variants = (
+            db.query(VariantData)
+            .filter(VariantData.experiment_id == exp_uuid)
+            .options(_jl(VariantData.mutations))
+            .order_by(VariantData.generation.asc(), VariantData.plasmid_variant_index.asc())
+            .all()
+        )
+
+        if not variants:
+            return jsonify({'success': False, 'error': 'No variants found for this experiment'}), 404
+
+        import csv as _csv
+        output = io.StringIO()
+        fieldnames = [
+            'variant_index', 'generation',
+            'position', 'wt_aa', 'mut_aa',
+            'wt_codon', 'mut_codon',
+            'mutation_type', 'aa_change',
+            'generation_introduced',
+        ]
+        writer = _csv.DictWriter(output, fieldnames=fieldnames)
+        writer.writeheader()
+
+        for v in variants:
+            for m in (v.mutations or []):
+                writer.writerow({
+                    'variant_index':        v.plasmid_variant_index,
+                    'generation':           v.generation,
+                    'position':             m.position,
+                    'wt_aa':                m.wild_type,
+                    'mut_aa':               m.mutant,
+                    'wt_codon':             m.wt_codon or '',
+                    'mut_codon':            m.mut_codon or '',
+                    'mutation_type':        m.mutation_type,
+                    'aa_change':            f"{m.wild_type}{m.position}{m.mutant}",
+                    'generation_introduced': m.generation_introduced,
+                })
+
+        output.seek(0)
+        buf = io.BytesIO(output.getvalue().encode('utf-8'))
+        safe_name = (experiment.name or experiment_id).replace(' ', '_')
+        filename = f"{safe_name}_mutations.csv"
+
+        return send_file(
+            buf,
+            mimetype='text/csv',
+            as_attachment=True,
+            download_name=filename,
+        )
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': 'Server error'}), 500
+
+
+@experiments_bp.route('/<experiment_id>/plots/activity-distribution', methods=['GET'])
+def plot_activity_distribution(experiment_id: str):
+    """Return a PNG of the activity score distribution violin plot.
+    Runs the original matplotlib/seaborn code from activity_score_per_gen.py
+    server-side and streams the image back.
+    """
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({'success': False, 'error': 'Unauthorized'}), 401
+
+    try:
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        experiment = experiment_service.get_experiment_by_id(experiment_id, user_id)
+        if not experiment:
+            return jsonify({'success': False, 'error': 'Experiment not found'}), 404
+
+        exp_uuid = uuid.UUID(experiment_id) if isinstance(experiment_id, str) else experiment_id
+        variants = (
+            db.query(VariantData)
+            .filter(
+                VariantData.experiment_id == exp_uuid,
+                VariantData.qc_status == 'passed',
+                VariantData.activity_score.isnot(None),
+            )
+            .all()
+        )
+
+        if not variants:
+            return jsonify({'success': False, 'error': 'No QC-passed variants with activity scores'}), 404
+
+        df = pd.DataFrame([
+            {
+                'Directed_Evolution_Generation': v.generation,
+                'activity_score': float(v.activity_score),
+            }
+            for v in variants
+        ])
+        df = df.dropna(subset=['Directed_Evolution_Generation', 'activity_score'])
+
+        # ── original activity_score_per_gen.py plot logic ─────────────────────
+        gens = sorted(df['Directed_Evolution_Generation'].unique())
+
+        # Filter out generations with fewer than 2 points (violinplot requires ≥2)
+        data = [
+            df[df['Directed_Evolution_Generation'] == g]['activity_score'].values.astype(float)
+            for g in gens
+            if len(df[df['Directed_Evolution_Generation'] == g]) >= 2
+        ]
+        gens = [
+            g for g in gens
+            if len(df[df['Directed_Evolution_Generation'] == g]) >= 2
+        ]
+
+        if not data:
+            return jsonify({'success': False, 'error': 'Not enough data points per generation to draw violin plots (need ≥2 per generation)'}), 404
+
+        fig, ax = plt.subplots(figsize=(11, 6))
+        fig.patch.set_facecolor('#ffffff')
+        ax.set_facecolor('#f8fafc')
+
+        violins = ax.violinplot(data, widths=0.75, points=200)
+
+        for pc in violins['bodies']:
+            pc.set_facecolor('#bfdbfe')   # blue-200
+            pc.set_edgecolor('#3b82f6')   # blue-500
+            pc.set_alpha(0.85)
+        for part in ('cbars', 'cmins', 'cmaxes'):
+            if part in violins:
+                violins[part].set_visible(False)
+
+        for i, v in enumerate(data, start=1):
+            vmin = np.min(v)
+            vmax = np.max(v)
+            mean = np.mean(v)
+            median = np.median(v)
+
+            ax.vlines(i, vmin, vmax, linewidth=1.5, colors='#2563eb')   # blue-600
+            ax.hlines(vmin,   i - 0.12, i + 0.12, linewidth=1.5, colors='#2563eb')
+            ax.hlines(vmax,   i - 0.12, i + 0.12, linewidth=1.5, colors='#2563eb')
+            ax.hlines(mean,   i - 0.18, i + 0.18, linewidth=2.5, colors='#1d4ed8')  # blue-700
+            ax.hlines(median, i - 0.18, i + 0.18, linewidth=2.5, colors='#7c3aed')  # violet-700
+
+        ax.set_xticks(range(1, len(gens) + 1))
+        ax.set_xticklabels([f'Gen {int(g)}' for g in gens], color='#475569')
+        ax.tick_params(colors='#475569')
+        ax.set_xlabel('Generation', color='#475569', fontsize=10)
+        ax.set_ylabel('Activity Score', color='#475569', fontsize=10)
+        ax.set_title('Activity Score Distribution by Generation', color='#1e293b', fontsize=12, fontweight='bold', pad=10)
+        for spine in ax.spines.values():
+            spine.set_color('#e2e8f0')
+        ax.grid(True, color='#e2e8f0', linewidth=0.6, linestyle='--')
+        ax.set_axisbelow(True)
+
+        plt.tight_layout()
+        # ───────────────────────────────────────────────────────────────────────
+
+        buf = io.BytesIO()
+        fig.savefig(buf, format='png', dpi=140, bbox_inches='tight',
+                    facecolor='#ffffff')
+        plt.close(fig)
+        buf.seek(0)
+
+        return send_file(buf, mimetype='image/png')
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500

@@ -25,6 +25,7 @@ import {
   ArrowRight,
   FileText,
   Dna,
+  Download,
 } from "lucide-react";
 import type { UniProtProtein } from "@/lib/types";
 import Loading from "./loading";
@@ -494,6 +495,55 @@ export default function NewExperimentPage() {
                   <span className="font-medium">
                     {plasmidName || "Unnamed"}
                   </span>
+                </div>
+              </div>
+
+              {/* UniProt Downloads */}
+              <div className="rounded-lg border border-border p-4 space-y-3">
+                <p className="text-sm font-medium text-foreground flex items-center gap-2">
+                  <Download className="h-4 w-4" />
+                  Download UniProt Data
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Download sequence and annotation data for{" "}
+                  <span className="font-mono">{protein?.accession}</span> from
+                  UniProt.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <a
+                    href={`${
+                      process.env.NEXT_PUBLIC_BACKEND_URL ||
+                      "http://localhost:8000"
+                    }/api/uniprot/${protein?.accession}/fasta`}
+                    download={`${protein?.accession}.fasta`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <Button variant="outline" size="sm">
+                      <Download className="h-3.5 w-3.5 mr-1.5" />
+                      FASTA Sequence
+                    </Button>
+                  </a>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (!protein) return;
+                      const blob = new Blob(
+                        [JSON.stringify(protein, null, 2)],
+                        { type: "application/json" },
+                      );
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = url;
+                      a.download = `${protein.accession}_protein_data.json`;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                    }}
+                  >
+                    <Download className="h-3.5 w-3.5 mr-1.5" />
+                    Protein Data (JSON)
+                  </Button>
                 </div>
               </div>
 

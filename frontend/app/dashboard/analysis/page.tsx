@@ -2,6 +2,7 @@
 
 import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
+import dynamic from "next/dynamic";
 import { useAuth } from "@/lib/auth-context";
 import {
   Card,
@@ -20,12 +21,42 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { BarChart3, Loader2, TrendingUp, Dna, AlertCircle } from "lucide-react";
-import { TopPerformersTable } from "@/components/analysis/top-performers-table";
-import { ActivityDistributionChart } from "@/components/analysis/activity-distribution-chart";
-import { MutationFingerprint } from "@/components/analysis/mutation-fingerprint";
-import { ActivityLandscape } from "@/components/analysis/activity-landscape";
+import { Skeleton } from "@/components/ui/skeleton";
 import type { Experiment, VariantData } from "@/lib/types";
 import Loading from "./loading";
+
+// Dynamically import all heavy analysis components so Next.js code-splits
+// them into separate chunks. This prevents react-plotly.js (~3 MB) and
+// recharts from being parsed as part of the main page bundle, cutting the
+// first-compile time from ~20 s down to ~3 s.
+const TopPerformersTable = dynamic(
+  () =>
+    import("@/components/analysis/top-performers-table").then((m) => ({
+      default: m.TopPerformersTable,
+    })),
+  { ssr: false, loading: () => <Skeleton className="h-48 w-full" /> },
+);
+const ActivityDistributionChart = dynamic(
+  () =>
+    import("@/components/analysis/activity-distribution-chart").then((m) => ({
+      default: m.ActivityDistributionChart,
+    })),
+  { ssr: false, loading: () => <Skeleton className="h-64 w-full" /> },
+);
+const MutationFingerprint = dynamic(
+  () =>
+    import("@/components/analysis/mutation-fingerprint").then((m) => ({
+      default: m.MutationFingerprint,
+    })),
+  { ssr: false, loading: () => <Skeleton className="h-96 w-full" /> },
+);
+const ActivityLandscape = dynamic(
+  () =>
+    import("@/components/analysis/activity-landscape").then((m) => ({
+      default: m.ActivityLandscape,
+    })),
+  { ssr: false, loading: () => <Skeleton className="h-96 w-full" /> },
+);
 
 function AnalysisContent() {
   const searchParams = useSearchParams();
@@ -44,6 +75,7 @@ function AnalysisContent() {
   const [selectedVariantIndex, setSelectedVariantIndex] = useState<
     number | null
   >(null);
+  const [activeTab, setActiveTab] = useState("overview");
   const [loadError, setLoadError] = useState<string | null>(null);
   const [variantError, setVariantError] = useState<string | null>(null);
 
@@ -100,6 +132,8 @@ function AnalysisContent() {
         return;
       }
       setVariantError(null);
+      setSelectedVariantIndex(null);
+      setActiveTab("overview");
 
       try {
         const res = await fetch(
@@ -187,7 +221,7 @@ function AnalysisContent() {
             Analysis Dashboard
           </h1>
           <p className="text-muted-foreground mt-1">
-            Visualize and analyze your directed evolution experiments
+            Visualise and analyse your directed evolution experiments
           </p>
         </div>
 
@@ -246,7 +280,7 @@ function AnalysisContent() {
         </Card>
       ) : (
         <>
-          {/* Summary stats */}
+          // Summary stats //
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <Card>
               <CardContent className="pt-6">
@@ -288,9 +322,8 @@ function AnalysisContent() {
               </CardContent>
             </Card>
           </div>
-
-          {/* Visualizations */}
-          <Tabs defaultValue="overview">
+          {/* Visualisations */}
+          <Tabs value={activeTab} onValueChange={setActiveTab}>
             <TabsList>
               <TabsTrigger value="overview">Overview</TabsTrigger>
               <TabsTrigger value="performers">Top Performers</TabsTrigger>
@@ -299,7 +332,10 @@ function AnalysisContent() {
             </TabsList>
 
             <TabsContent value="overview" className="space-y-6 mt-6">
-              <ActivityDistributionChart variants={passedVariants} />
+              <ActivityDistributionChart
+                variants={passedVariants}
+                experimentId={selectedExpId}
+              />
 
               <Card>
                 <CardHeader>
@@ -314,7 +350,10 @@ function AnalysisContent() {
                 <CardContent>
                   <TopPerformersTable
                     variants={topPerformers}
-                    onSelectVariant={(idx) => setSelectedVariantIndex(idx)}
+                    onSelectVariant={(idx) => {
+                      setSelectedVariantIndex(idx);
+                      setActiveTab("mutations");
+                    }}
                     selectedVariant={selectedVariantIndex}
                     isLoading={isLoadingTopPerformers}
                   />
@@ -334,7 +373,10 @@ function AnalysisContent() {
                 <CardContent>
                   <TopPerformersTable
                     variants={topPerformers}
-                    onSelectVariant={(idx) => setSelectedVariantIndex(idx)}
+                    onSelectVariant={(idx) => {
+                      setSelectedVariantIndex(idx);
+                      setActiveTab("mutations");
+                    }}
                     selectedVariant={selectedVariantIndex}
                     isLoading={isLoadingTopPerformers}
                     detailed

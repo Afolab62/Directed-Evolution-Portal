@@ -285,7 +285,7 @@ def validate_row(row):
         errors.append("is_control must be boolean")
 
     seq = row.get("assembled_dna_sequence")
-    if isinstance(seq, str) and not set(seq.upper()).issubset(set("ATCG")):
+    if isinstance(seq, str) and not set(seq.upper()).issubset(set("ATCGNRYZ")):
         errors.append("DNA sequence contains invalid characters")
 
     return errors

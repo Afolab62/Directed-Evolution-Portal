@@ -1,7 +1,6 @@
 ﻿"use client";
 
-import { useState, useEffect, useMemo } from "react";
-import dynamic from "next/dynamic";
+import { useState, useEffect } from "react";
 import {
   Card,
   CardContent,
@@ -17,102 +16,165 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Dna, AlertCircle } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  Loader2,
+  Dna,
+  AlertCircle,
+  Download,
+  BarChart2,
+  Box,
+  Crosshair,
+  X,
+} from "lucide-react";
 import type { VariantData } from "@/lib/types";
 
-// Plotly is browser-only â€” dynamic import
-const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
+const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
-// â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-interface Fingerprint3dResponse {
-  success: boolean;
-  error?: string;
-  // Plotly figure JSON returned by fig.to_json()
-  figure: {
-    data: Plotly.Data[];
-    layout: Partial<Plotly.Layout>;
-  };
-  variantId: string;
-  plasmidVariantIndex: number;
-  generation: number;
-  activityScore: number | null;
-  numMutations: number;
-  numSynonymous: number;
-  numNonSynonymous: number;
-  structureStatus: string;
-  lineageLength: number;
-}
+// ── Props ─────────────────────────────────────────────────────────────────
 
-// â”€â”€ Props â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 interface MutationFingerprintProps {
   variants: VariantData[];
   experimentId: string;
   selectedVariantIndex: number | null;
   onSelectVariant: (index: number) => void;
-  wtSequence?: string; // kept for backward compat
+  wtSequence?: string;
 }
+
+// ── Iframe figure component ───────────────────────────────────────────────
+// Points an <iframe src> directly at the backend ?format=html endpoint.
+// The browser fetches and renders it natively — no JS string wrangling,
+// no srcDoc size limits, CDN scripts load freely in the iframe's own context.
+
+function PlotlyIframe({
+  url,
+  height,
+  label,
+}: {
+  url: string;
+  height: number;
+  label: string;
+}) {
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState(false);
+
+  // Reset state whenever the URL changes (new variant selected)
+  useEffect(() => {
+    setLoaded(false);
+    setError(false);
+  }, [url]);
+
+  return (
+    <div style={{ position: "relative", width: "100%", height }}>
+      {/* Spinner shown until iframe fires onLoad */}
+      {!loaded && !error && (
+        <div
+          className="absolute inset-0 flex items-center justify-center gap-3"
+          style={{ zIndex: 1 }}
+        >
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          <span className="text-muted-foreground text-sm">
+            Loading {label}…
+          </span>
+        </div>
+      )}
+      {error && (
+        <div
+          className="absolute inset-0 flex flex-col items-center justify-center gap-2"
+          style={{ zIndex: 1 }}
+        >
+          <AlertCircle className="h-8 w-8 text-destructive" />
+          <p className="text-sm text-destructive">Failed to load {label}</p>
+        </div>
+      )}
+      <iframe
+        key={url}
+        src={url}
+        width="100%"
+        height={height}
+        style={{ border: "none", display: "block", opacity: loaded ? 1 : 0 }}
+        title={label}
+        onLoad={() => setLoaded(true)}
+        onError={() => setError(true)}
+      />
+    </div>
+  );
+}
+
+// ── Main component ────────────────────────────────────────────────────────
 
 export function MutationFingerprint({
   variants,
   experimentId,
   selectedVariantIndex,
   onSelectVariant,
+  wtSequence,
 }: MutationFingerprintProps) {
-  const [fpData, setFpData] = useState<Fingerprint3dResponse | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const selectedVariant = useMemo(
-    () =>
-      variants.find((v) => v.plasmidVariantIndex === selectedVariantIndex) ??
-      null,
-    [variants, selectedVariantIndex],
+  const [activeTab, setActiveTab] = useState<"linear" | "3d">("linear");
+  const [fp3dRequested, setFp3dRequested] = useState(false);
+  const [highlightedPosition, setHighlightedPosition] = useState<number | null>(
+    null,
   );
 
-  // Fetch the Plotly figure from the new 3D endpoint whenever selection changes
+  // Reset when variant changes
   useEffect(() => {
-    if (!selectedVariant || !experimentId) {
-      setFpData(null);
-      return;
-    }
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
+    setFp3dRequested(false);
+    setActiveTab("linear");
+    setHighlightedPosition(null);
+  }, [selectedVariantIndex]);
 
-    fetch(
-      `${process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000"}/api/experiments/${experimentId}/fingerprint3d/${selectedVariant.id}`,
-      { credentials: "include" },
-    )
-      .then((r) => r.json())
-      .then((data: Fingerprint3dResponse) => {
-        if (cancelled) return;
-        if (data.success) setFpData(data);
-        else setError(data.error ?? "Failed to load fingerprint");
-      })
-      .catch(() => {
-        if (!cancelled) setError("Network error");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
+  // Listen for clicks forwarded from the linear fingerprint iframe.
+  // When the user clicks a mutation triangle, the iframe fires:
+  //   window.parent.postMessage({ type: 'dem_mutation_click', position: N }, '*')
+  // We catch it here, record the position, and switch to the 3D tab with the
+  // corresponding residue highlighted as a gold sphere.
+  useEffect(() => {
+    const handle = (e: MessageEvent) => {
+      if (!e.data || e.data.type !== "dem_mutation_click") return;
+      const pos = Number(e.data.position);
+      if (!Number.isFinite(pos)) return;
+      setHighlightedPosition(pos);
+      setFp3dRequested(true);
+      setActiveTab("3d");
     };
-  }, [selectedVariant?.id, experimentId]);
+    window.addEventListener("message", handle);
+    return () => window.removeEventListener("message", handle);
+  }, []);
 
-  // â”€â”€ Responsive layout override â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  // The backend produces a fixed height=860 layout; keep that but make it
-  // fill the card width by overriding layout.autosize.
-  const plotLayout = useMemo((): Partial<Plotly.Layout> => {
-    if (!fpData?.figure?.layout) return {};
-    return {
-      ...fpData.figure.layout,
-      autosize: true,
-    };
-  }, [fpData]);
+  const selectedVariant =
+    variants.find((v) => v.plasmidVariantIndex === selectedVariantIndex) ??
+    null;
 
-  // â”€â”€ Render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Iframe URLs — backend returns self-contained Plotly HTML for ?format=html
+  const linearHtmlUrl = selectedVariant
+    ? `${BACKEND}/api/experiments/${experimentId}/fingerprint_linear/${selectedVariant.id}?format=html`
+    : null;
+  const fp3dHtmlUrl = selectedVariant
+    ? `${BACKEND}/api/experiments/${experimentId}/fingerprint3d/${selectedVariant.id}?format=html${
+        highlightedPosition != null ? `&highlight=${highlightedPosition}` : ""
+      }`
+    : null;
+
+  const handleTabChange = (tab: string) => {
+    setActiveTab(tab as "linear" | "3d");
+    if (tab === "3d") setFp3dRequested(true);
+  };
+
+  // Summary counts derived from already-loaded VariantData — no extra fetch needed
+  const mutationCount =
+    selectedVariant?.mutationCount ??
+    selectedVariant?.mutations?.length ??
+    null;
+
+  const synonymousCount =
+    selectedVariant?.mutations?.filter((m) => m.type === "synonymous").length ??
+    null;
+  const nonSynonymousCount =
+    selectedVariant?.mutations?.filter((m) => m.type === "non-synonymous")
+      .length ?? null;
+
+  // ── Render ───────────────────────────────────────────────────────────────
   return (
     <Card>
       <CardHeader>
@@ -121,8 +183,9 @@ export function MutationFingerprint({
           Mutation Fingerprint
         </CardTitle>
         <CardDescription>
-          Select a variant to view mutations mapped onto the 3D protein
-          structure (AlphaFold backbone coloured by pLDDT confidence)
+          Linear view shows mutations along the sequence backbone by generation.
+          3D view maps them onto the AlphaFold structure (pLDDT-coloured
+          backbone).
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -136,12 +199,12 @@ export function MutationFingerprint({
             onValueChange={(v) => onSelectVariant(parseFloat(v))}
           >
             <SelectTrigger>
-              <SelectValue placeholder="Choose a top-performing variantâ€¦" />
+              <SelectValue placeholder="Choose a variant…" />
             </SelectTrigger>
             <SelectContent>
               {variants.map((v, idx) => (
                 <SelectItem key={v.id} value={v.plasmidVariantIndex.toString()}>
-                  #{idx + 1} â€” Variant {v.plasmidVariantIndex} | Gen{" "}
+                  #{idx + 1} — Variant {v.plasmidVariantIndex} | Gen{" "}
                   {v.generation} | Activity {(v.activityScore ?? 0).toFixed(3)}
                 </SelectItem>
               ))}
@@ -156,73 +219,116 @@ export function MutationFingerprint({
               Select a variant above to view its mutation fingerprint
             </p>
           </div>
-        ) : loading ? (
-          <div className="flex flex-col items-center justify-center py-12 gap-3">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-            <span className="text-muted-foreground text-sm">
-              Fetching 3D structure…
-            </span>
-          </div>
-        ) : error ? (
-          <div className="flex flex-col items-center py-10 text-center">
-            <AlertCircle className="h-8 w-8 text-destructive mb-2" />
-            <p className="text-sm text-destructive">{error}</p>
-          </div>
-        ) : fpData && fpData.numMutations === 0 ? (
-          <div className="text-center py-10">
-            <p className="text-muted-foreground font-medium">
-              Wild-type â€” no mutations in lineage
-            </p>
-            <p className="text-sm text-muted-foreground mt-1">
-              This variant and its ancestors carry no changes relative to the WT
-              reference.
-            </p>
-          </div>
-        ) : fpData ? (
+        ) : (
           <>
-            {/* Summary badges */}
-            <div className="flex flex-wrap gap-3 text-sm">
+            {/* Summary badges — built from already-loaded VariantData, zero extra fetches */}
+            <div className="flex flex-wrap items-center gap-3 text-sm">
               <span className="text-muted-foreground">
                 Variant{" "}
                 <span className="font-mono font-medium text-foreground">
-                  {fpData.plasmidVariantIndex}
+                  {selectedVariant.plasmidVariantIndex}
                 </span>
               </span>
-              <Badge variant="outline">Gen {fpData.generation}</Badge>
+              <Badge variant="outline">Gen {selectedVariant.generation}</Badge>
               <Badge variant="outline">
-                Activity {(fpData.activityScore ?? 0).toFixed(3)}
+                Activity {(selectedVariant.activityScore ?? 0).toFixed(3)}
               </Badge>
-              <Badge variant="outline">
-                {fpData.numMutations} mutation
-                {fpData.numMutations !== 1 ? "s" : ""}
-              </Badge>
-              <Badge variant="outline">
-                {fpData.numNonSynonymous} non-synonymous
-              </Badge>
-              <Badge variant="outline">{fpData.numSynonymous} synonymous</Badge>
-              <Badge variant="outline">
-                {fpData.lineageLength} step
-                {fpData.lineageLength !== 1 ? "s" : ""} in lineage
-              </Badge>
-              {fpData.structureStatus && (
-                <Badge variant="secondary" className="text-xs">
-                  {fpData.structureStatus}
+              {mutationCount !== null && (
+                <Badge variant="outline">
+                  {mutationCount} mutation{mutationCount !== 1 ? "s" : ""}
                 </Badge>
               )}
+              {nonSynonymousCount !== null && (
+                <Badge variant="outline">
+                  {nonSynonymousCount} non-synonymous
+                </Badge>
+              )}
+              {synonymousCount !== null && (
+                <Badge variant="outline">{synonymousCount} synonymous</Badge>
+              )}
+              <Button
+                size="sm"
+                variant="outline"
+                className="ml-auto gap-1.5"
+                asChild
+              >
+                <a
+                  href={`${BACKEND}/api/experiments/${experimentId}/mutations/export`}
+                  download
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  Export CSV
+                </a>
+              </Button>
             </div>
 
-            {/* Plotly circular fingerprint + optional 3D panel */}
-            <div className="w-full overflow-x-auto">
-              <Plot
-                data={fpData.figure.data}
-                layout={plotLayout}
-                config={{ displayModeBar: true, responsive: true }}
-                style={{ width: "100%" }}
-                useResizeHandler
-              />
-            </div>
+            {/* Linear / 3D tabs */}
+            <Tabs value={activeTab} onValueChange={handleTabChange}>
+              <TabsList>
+                <TabsTrigger value="linear" className="gap-1.5">
+                  <BarChart2 className="h-4 w-4" />
+                  Linear
+                </TabsTrigger>
+                <TabsTrigger value="3d" className="gap-1.5">
+                  <Box className="h-4 w-4" />
+                  3D Structure
+                </TabsTrigger>
+              </TabsList>
+
+              {/* ── Linear tab ── */}
+              <TabsContent value="linear" className="mt-4">
+                {linearHtmlUrl && (
+                  <PlotlyIframe
+                    url={linearHtmlUrl}
+                    height={560}
+                    label="linear fingerprint"
+                  />
+                )}
+              </TabsContent>
+
+              {/* ── 3D Structure tab ── */}
+              <TabsContent value="3d" className="mt-4 space-y-3">
+                {!fp3dRequested ? (
+                  <div className="flex flex-col items-center justify-center py-16 gap-3">
+                    <Box className="h-10 w-10 text-muted-foreground/40" />
+                    <p className="text-sm text-muted-foreground">
+                      Click a mutation triangle in the Linear tab to jump
+                      directly to it in 3D, or switch to this tab to load the
+                      full structure.
+                    </p>
+                  </div>
+                ) : fp3dHtmlUrl ? (
+                  <>
+                    {/* Highlight indicator — shown when user clicked a triangle in the linear view */}
+                    {highlightedPosition != null ? (
+                      <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-yellow-50 border border-yellow-200 text-yellow-800 dark:bg-yellow-950 dark:border-yellow-800 dark:text-yellow-300">
+                        <Crosshair className="h-4 w-4 shrink-0 text-yellow-600" />
+                        <span className="text-sm flex-1">
+                          Highlighting residue{" "}
+                          <span className="font-mono font-semibold">
+                            {highlightedPosition}
+                          </span>{" "}
+                          — gold sphere in the 3D view
+                        </span>
+                        <button
+                          onClick={() => setHighlightedPosition(null)}
+                          className="shrink-0 text-yellow-600 hover:text-yellow-800 dark:text-yellow-400"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ) : null}
+                    <PlotlyIframe
+                      url={fp3dHtmlUrl}
+                      height={800}
+                      label="3D structure fingerprint"
+                    />
+                  </>
+                ) : null}
+              </TabsContent>
+            </Tabs>
           </>
-        ) : null}
+        )}
       </CardContent>
     </Card>
   );

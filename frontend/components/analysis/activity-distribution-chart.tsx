@@ -1,60 +1,115 @@
-"use client"
+"use client";
 
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  ResponsiveContainer,
-  Cell,
-} from 'recharts'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart'
-import { BarChart3 } from 'lucide-react'
-import type { VariantData, GenerationStats } from '@/lib/types'
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { BarChart3 } from "lucide-react";
+import type { VariantData } from "@/lib/types";
+
+const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
 interface ActivityDistributionChartProps {
-  variants: VariantData[]
+  variants: VariantData[];
+  experimentId: string;
 }
 
-export function ActivityDistributionChart({ variants }: ActivityDistributionChartProps) {
+export function ActivityDistributionChart({
+  variants,
+  experimentId,
+}: ActivityDistributionChartProps) {
+  const [imgSrc, setImgSrc] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const prevUrl = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!experimentId) return;
+    let active = true;
+    setLoading(true);
+    setError(null);
+
+    fetch(
+      `${BACKEND}/api/experiments/${experimentId}/plots/activity-distribution`,
+      { credentials: "include" },
+    )
+      .then((res) => {
+        if (!res.ok)
+          return res.json().then((j) => {
+            throw new Error(j.error || `Server error ${res.status}`);
+          });
+        return res.blob();
+      })
+      .then((blob) => {
+        if (!active) return;
+        // Revoke previous blob URL to avoid memory leak
+        if (prevUrl.current) URL.revokeObjectURL(prevUrl.current);
+        const url = URL.createObjectURL(blob);
+        prevUrl.current = url;
+        setImgSrc(url);
+      })
+      .catch((err) => {
+        if (active) setError(err.message);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [experimentId]);
+
+  // Summary stats computed from variants prop (unchanged)
   const generationStats = useMemo(() => {
-    const generations = [...new Set(variants.map(v => v.generation))].sort((a, b) => a - b)
-    
-    return generations.map(gen => {
-      const genVariants = variants.filter(v => v.generation === gen)
-      const scores = genVariants.map(v => v.activityScore).sort((a, b) => a - b)
-      
-      const mean = scores.reduce((s, v) => s + v, 0) / scores.length
-      const median = scores[Math.floor(scores.length / 2)] || 0
-      const min = Math.min(...scores)
-      const max = Math.max(...scores)
-      
-      // Calculate std dev
-      const squaredDiffs = scores.map(s => Math.pow(s - mean, 2))
-      const avgSquaredDiff = squaredDiffs.reduce((s, v) => s + v, 0) / scores.length
-      const stdDev = Math.sqrt(avgSquaredDiff)
+    const generations = [...new Set(variants.map((v) => v.generation))].sort(
+      (a, b) => a - b,
+    );
+
+    return generations.map((gen) => {
+      const scores = variants
+        .filter((v) => v.generation === gen)
+        .map((v) => v.activityScore)
+        .filter((s) => s != null && isFinite(s))
+        .sort((a, b) => a - b);
+
+      if (scores.length === 0)
+        return {
+          generation: gen,
+          count: 0,
+          meanActivity: 0,
+          medianActivity: 0,
+          minActivity: 0,
+          maxActivity: 0,
+          stdDev: 0,
+        };
+
+      const mean = scores.reduce((s, v) => s + v, 0) / scores.length;
+      const mid = Math.floor(scores.length / 2);
+      const median =
+        scores.length % 2 === 0
+          ? (scores[mid - 1] + scores[mid]) / 2
+          : scores[mid];
+      const stdDev = Math.sqrt(
+        scores.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / scores.length,
+      );
 
       return {
         generation: gen,
-        count: genVariants.length,
+        count: scores.length,
         meanActivity: mean,
         medianActivity: median,
-        minActivity: min,
-        maxActivity: max,
+        minActivity: scores[0],
+        maxActivity: scores[scores.length - 1],
         stdDev,
-      } as GenerationStats
-    })
-  }, [variants])
-
-  // Compute colors in JS - hsl values for chart colors
-  const getBarColor = (index: number) => {
-    const hues = [200, 160, 280, 80, 25] // chart-1 through chart-5 hue approximations
-    const hue = hues[index % hues.length]
-    return `hsl(${hue}, 60%, 50%)`
-  }
+      };
+    });
+  }, [variants]);
 
   if (generationStats.length === 0) {
     return (
@@ -64,7 +119,7 @@ export function ActivityDistributionChart({ variants }: ActivityDistributionChar
           <p className="text-muted-foreground">No generation data available</p>
         </CardContent>
       </Card>
-    )
+    );
   }
 
   return (
@@ -72,64 +127,30 @@ export function ActivityDistributionChart({ variants }: ActivityDistributionChar
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <BarChart3 className="h-5 w-5" />
-          Activity Distribution by Generation
+          Activity Score Distribution by Generation
         </CardTitle>
         <CardDescription>
-          Mean activity score per generation showing evolution progress
+          Violin plot showing the full score distribution, mean, and median per
+          generation
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <ChartContainer
-          config={{
-            meanActivity: {
-              label: "Mean Activity",
-              color: "hsl(200, 60%, 50%)",
-            },
-            maxActivity: {
-              label: "Max Activity",
-              color: "hsl(160, 60%, 50%)",
-            },
-          }}
-          className="h-[350px]"
-        >
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={generationStats} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-              <XAxis 
-                dataKey="generation" 
-                tickFormatter={(v) => `Gen ${v}`}
-                className="text-muted-foreground"
-              />
-              <YAxis 
-                label={{ value: 'Activity Score', angle: -90, position: 'insideLeft' }}
-                className="text-muted-foreground"
-              />
-              <ChartTooltip 
-                content={
-                  <ChartTooltipContent 
-                    formatter={(value, name) => {
-                      if (name === 'meanActivity') return [`${Number(value).toFixed(3)}`, 'Mean Activity']
-                      if (name === 'maxActivity') return [`${Number(value).toFixed(3)}`, 'Max Activity']
-                      return [String(value), String(name)]
-                    }}
-                  />
-                }
-              />
-              <Bar 
-                dataKey="meanActivity" 
-                name="meanActivity"
-                radius={[4, 4, 0, 0]}
-              >
-                {generationStats.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={getBarColor(index)} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </ChartContainer>
+        {loading && <Skeleton className="w-full h-95 rounded-md" />}
+        {error && !loading && (
+          <div className="w-full h-95 flex items-center justify-center text-muted-foreground text-sm">
+            Failed to load plot: {error}
+          </div>
+        )}
+        {imgSrc && !loading && (
+          <img
+            src={imgSrc}
+            alt="Activity score distribution by generation"
+            className="w-full max-h-[500px] object-contain rounded-lg border border-border"
+          />
+        )}
 
         {/* Generation summary table */}
-        <div className="mt-6 overflow-x-auto">
+        <div className="mt-4 overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b">
@@ -145,13 +166,25 @@ export function ActivityDistributionChart({ variants }: ActivityDistributionChar
             <tbody>
               {generationStats.map((stat) => (
                 <tr key={stat.generation} className="border-b">
-                  <td className="py-2 px-2 font-medium">Gen {stat.generation}</td>
+                  <td className="py-2 px-2 font-medium">
+                    Gen {stat.generation}
+                  </td>
                   <td className="py-2 px-2">{stat.count}</td>
-                  <td className="py-2 px-2 font-mono">{stat.meanActivity.toFixed(3)}</td>
-                  <td className="py-2 px-2 font-mono">{stat.medianActivity.toFixed(3)}</td>
-                  <td className="py-2 px-2 font-mono text-muted-foreground">{stat.minActivity.toFixed(3)}</td>
-                  <td className="py-2 px-2 font-mono text-accent">{stat.maxActivity.toFixed(3)}</td>
-                  <td className="py-2 px-2 font-mono text-muted-foreground">{stat.stdDev.toFixed(3)}</td>
+                  <td className="py-2 px-2 font-mono">
+                    {stat.meanActivity.toFixed(3)}
+                  </td>
+                  <td className="py-2 px-2 font-mono">
+                    {stat.medianActivity.toFixed(3)}
+                  </td>
+                  <td className="py-2 px-2 font-mono text-muted-foreground">
+                    {stat.minActivity.toFixed(3)}
+                  </td>
+                  <td className="py-2 px-2 font-mono text-green-400">
+                    {stat.maxActivity.toFixed(3)}
+                  </td>
+                  <td className="py-2 px-2 font-mono text-muted-foreground">
+                    {stat.stdDev.toFixed(3)}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -159,5 +192,5 @@ export function ActivityDistributionChart({ variants }: ActivityDistributionChar
         </div>
       </CardContent>
     </Card>
-  )
+  );
 }

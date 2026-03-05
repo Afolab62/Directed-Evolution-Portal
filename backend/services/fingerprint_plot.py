@@ -419,6 +419,226 @@ def _add_functional_overlays(
 
 
 # ---------------------------------------------------------------------------
+# Public: build_linear_fingerprint
+# ---------------------------------------------------------------------------
+
+# One colour per generation (up to 10).  Matches Figure 3 in the brief.
+_GENERATION_COLORS: list[str] = [
+    "#f97316",  # Gen 1  — orange
+    "#22c55e",  # Gen 2  — green
+    "#ef4444",  # Gen 3  — red
+    "#a855f7",  # Gen 4  — purple
+    "#8b5cf6",  # Gen 5  — violet
+    "#64748b",  # Gen 6  — slate
+    "#84cc16",  # Gen 7  — lime
+    "#d4d4aa",  # Gen 8  — tan
+    "#a3e635",  # Gen 9  — yellow-green
+    "#3b82f6",  # Gen 10 — blue
+]
+
+
+def _assign_label_rows(positions: list[int], min_gap: int = 30) -> list[int]:
+    """
+    Assign a vertical row index to each mutation so labels at nearby
+    positions do not collide (greedy left-to-right sweep).
+    """
+    row_last: list[int] = []
+    rows: list[int] = []
+    for pos in positions:
+        placed = False
+        for idx, last in enumerate(row_last):
+            if pos - last >= min_gap:
+                row_last[idx] = pos
+                rows.append(idx)
+                placed = True
+                break
+        if not placed:
+            rows.append(len(row_last))
+            row_last.append(pos)
+    return rows
+
+
+def build_linear_fingerprint(
+    lineage_mutations: list[dict[str, Any]],
+    wt_protein_len: int,
+    variant_id: int | float,
+    window_start: int | None = None,
+    window_end: int | None = None,
+) -> go.Figure:
+    """
+    Build a linear (unfolded) mutation fingerprint Plotly figure.
+
+    Layout
+    ------
+    * Grey horizontal bar  = WT protein backbone
+    * Downward triangles   = mutation positions
+    * Colour               = generation the mutation was introduced
+    * Text labels          = 'WT>Mut (m/s)' stacked to avoid overlap
+
+    Optional window_start / window_end restrict which mutations are shown
+    and zoom the x-axis to that residue range for a closer view.
+    """
+    # Apply position window — filter to residues in [window_start, window_end]
+    if window_start is not None and window_end is not None:
+        lineage_mutations = [
+            m for m in lineage_mutations
+            if window_start <= int(m["position"]) <= window_end
+        ]
+
+    _LABEL_THRESHOLD = 80
+    show_labels = len(lineage_mutations) <= _LABEL_THRESHOLD
+
+    ROW_HEIGHT   = 0.55
+    MARKER_Y     = 0.45   # raised slightly to accommodate larger triangles
+    LABEL_Y_BASE = 0.90   # pushed up to leave room for bigger markers
+    BACKBONE_TOP = 0.12
+    Y_BOTTOM     = -0.80
+
+    fig = go.Figure()
+
+    # Protein backbone bar
+    fig.add_shape(
+        type="rect",
+        x0=0, x1=wt_protein_len,
+        y0=-0.16, y1=BACKBONE_TOP,
+        fillcolor="#64748b",
+        line={"width": 0},
+        layer="below",
+    )
+
+    generations = sorted({m["generation"] for m in lineage_mutations})
+
+    if show_labels:
+        all_sorted = sorted(lineage_mutations, key=lambda m: m["position"])
+        row_indices = _assign_label_rows([m["position"] for m in all_sorted])
+        row_lookup: dict[tuple, int] = {
+            (m["generation"], m["position"]): r
+            for m, r in zip(all_sorted, row_indices)
+        }
+        max_row = max(row_indices) if row_indices else 0
+    else:
+        row_lookup = {}
+        max_row = 0
+
+    for gen in generations:
+        gen_muts = [m for m in lineage_mutations if m["generation"] == gen]
+        color = _GENERATION_COLORS[(gen - 1) % len(_GENERATION_COLORS)]
+
+        xs: list[float] = []
+        ys_text: list[float] = []
+        labels: list[str] = []
+        hover_texts: list[str] = []
+
+        for m in gen_muts:
+            pos = int(m["position"])
+            mut_type = m["mutation_type"]
+            if mut_type == "insertion":
+                suffix = "(i)"
+            elif mut_type == "deletion":
+                suffix = "(d)"
+            elif mut_type == "synonymous":
+                suffix = "(s)"
+            else:
+                suffix = "(m)"
+            label = f"{m['wt_aa']}>{m['mut_aa']}<br>{suffix}"
+            row = row_lookup.get((gen, pos), 0)
+
+            xs.append(pos)
+            ys_text.append(LABEL_Y_BASE + row * ROW_HEIGHT)
+            labels.append(label)
+            codon_line = (
+                f"Codon: {m['wt_codon']}→{m['mut_codon']}<br>"
+                if m.get("wt_codon", "n/a") not in ("n/a", "", None) else ""
+            )
+            aa_change = m.get("aa_change") or (m["wt_aa"] + str(pos) + m["mut_aa"])
+            hover_texts.append(
+                f"<b>{aa_change}</b><br>"
+                f"Position: {pos}<br>"
+                f"Type: {mut_type}<br>"
+                + codon_line
+                + f"Generation: {gen}"
+            )
+
+        # Triangles
+        fig.add_trace(go.Scatter(
+            x=xs, y=[MARKER_Y] * len(xs),
+            mode="markers",
+            name=f"Generation {gen}",
+            marker={
+                "symbol": "triangle-down",
+                "size": 18 if show_labels else 14,
+                "color": color,
+                "line": {"color": "#1f2937", "width": 1.5},
+            },
+            hovertext=hover_texts,
+            hovertemplate="%{hovertext}<extra></extra>",
+            showlegend=True,
+        ))
+
+        if show_labels:
+            fig.add_trace(go.Scatter(
+                x=xs, y=ys_text,
+                mode="text",
+                text=labels,
+                textfont={"size": 10, "color": color},
+                hoverinfo="skip",
+                showlegend=False,
+                name=f"Generation {gen} labels",
+            ))
+            for x, yt in zip(xs, ys_text):
+                fig.add_shape(
+                    type="line",
+                    x0=x, x1=x,
+                    y0=BACKBONE_TOP,
+                    y1=yt - 0.12,
+                    line={"color": "#64748b", "width": 1.5},
+                    layer="below",
+                )
+
+    if show_labels:
+        y_top = LABEL_Y_BASE + (max_row + 1) * ROW_HEIGHT + 0.2
+        fig_h = max(480, 300 + max_row * 60)
+        note = ""
+    else:
+        y_top = MARKER_Y + 1.2
+        fig_h = 420
+        note = f"  —  {len(lineage_mutations)} mutations (hover a triangle for details)"
+
+    fig.update_layout(
+        title=f"Variant {variant_id} — Linear Mutation Fingerprint by Generation{note}",
+        xaxis={
+            "title": "Amino Acid Position",
+            "range": [
+                (window_start - 5) if window_start is not None else -15,
+                (window_end   + 5) if window_end   is not None else wt_protein_len + 15,
+            ],
+            "showgrid": True,
+            "gridcolor": "#e2e8f0",
+            "tickmode": "linear",
+            "dtick": max(1, ((window_end or wt_protein_len) - (window_start or 0)) // 10),
+            "zeroline": False,
+        },
+        yaxis={
+            "visible": False,
+            "range": [Y_BOTTOM, y_top],
+        },
+        template="plotly_white",
+        height=fig_h,
+        legend={
+            "title": {"text": "Generation"},
+            "orientation": "v",
+            "x": 1.01, "y": 1,
+            "bgcolor": "rgba(255,255,255,0.9)",
+            "bordercolor": "#cbd5e1", "borderwidth": 1,
+        },
+        margin={"l": 50, "r": 160, "t": 60, "b": 60},
+        hovermode="closest",
+    )
+
+    return fig
+
+
+# ---------------------------------------------------------------------------
 # Public: build_3d_fingerprint
 # ---------------------------------------------------------------------------
 
@@ -437,6 +657,7 @@ def build_3d_fingerprint(
     uniprot_id: str | None = None,
     structure_source: str = "Structure",
     feature_annotations: list[dict[str, Any]] | None = None,
+    highlight_position: int | None = None,
 ) -> go.Figure:
     """
     Build a structure-first 3D mutation map.
@@ -543,6 +764,31 @@ def build_3d_fingerprint(
                     "Type: %{customdata[4]}<br>"
                     "Generation: %{customdata[5]}<br>"
                     "pLDDT: %{customdata[6]}<extra></extra>"
+                ),
+            ))
+
+    # Highlighted residue — gold sphere drawn on top of everything else.
+    # Added when the user clicks a mutation in the linear fingerprint.
+    if highlight_position is not None:
+        coord = pdb_coords.get(int(highlight_position))
+        if coord:
+            fig.add_trace(go.Scatter3d(
+                x=[coord["x"]], y=[coord["y"]], z=[coord["z"]],
+                mode="markers",
+                name=f"Highlighted — position {highlight_position}",
+                showlegend=True,
+                marker={
+                    "symbol": "circle",
+                    "size": 18,
+                    "color": "#ffd700",   # gold
+                    "opacity": 1.0,
+                    "line": {"color": "#ffffff", "width": 2},
+                },
+                hovertemplate=(
+                    f"<b>Selected residue</b><br>"
+                    f"Position: {highlight_position}<br>"
+                    f"pLDDT: {coord.get('plddt', '?')}"
+                    "<extra></extra>"
                 ),
             ))
 

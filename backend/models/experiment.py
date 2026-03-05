@@ -8,7 +8,11 @@ import math
 
 
 def safe_float(value):
-    """Convert NaN/Infinity to None for JSON serialization"""
+    """Convert NaN/Infinity to None for JSON serialization
+    Pandas calculations can produce
+    NaN or Inf values that are valid in Python/numpy but will cause JSON
+    serialization to fail."""
+
     if value is None:
         return None
     if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
@@ -17,24 +21,32 @@ def safe_float(value):
 
 
 class Experiment(Base):
-    """Experiment model for storing directed evolution experiments"""
+    """
+    Represents a single directed evolution experiment.
+    Created when a user provides a UniProt accession and a plasmid sequence.
+    The plasmid is validated against the WT protein before the experiment is saved.
+    """
     __tablename__ = 'experiments'
-    
+
+    # UUID primary key — avoids sequential integer IDs being guessable in API routes
+
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)     # Cascade delete ensures all variants are removed if the owning user is deleted
+
     name = Column(String(255), nullable=False)
     
-    # UniProt data
+    # UniProt data — fetched from UniProt REST API at experiment creation time
+
     protein_accession = Column(String(50), nullable=False)
     wt_protein_sequence = Column(Text, nullable=False)
-    protein_features = Column(JSONB, nullable=True)  # Store UniProt features as JSON
-    
+    protein_features = Column(JSONB, nullable=True)      # Stores domain annotations from UniProt as JSON for use in the frontend
+
     # Plasmid data
     plasmid_name = Column(String(255), nullable=True)
     plasmid_sequence = Column(Text, nullable=False)
     
     # Validation results
-    validation_status = Column(String(20), nullable=False, default='pending')  # pending, valid, invalid
+    validation_status = Column(String(20), nullable=False, default='invalid')  # valid, invalid
     validation_message = Column(Text, nullable=True)
     validation_data = Column(JSONB, nullable=True)  # Full validation result from plasmid_validation
     
@@ -77,7 +89,12 @@ class Experiment(Base):
 
 
 class VariantData(Base):
-    """Model for storing experimental variant data"""
+    """
+    Stores a single variant (or control) row from an uploaded TSV/JSON data file.
+    Each variant belongs to one experiment and one generation of directed evolution.
+    Controls (is_control=True) are Gen 0 wild-type references used to normalise
+    activity scores across the rest of the variants.
+    """
     __tablename__ = 'variant_data'
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -100,12 +117,16 @@ class VariantData(Base):
     qc_status = Column(String(20), nullable=False, default='pending')  # passed, failed
     qc_message = Column(Text, nullable=True)
     
-    # Additional metadata stored as JSON
+    # Any extra columns from the TSV that don't map to a fixed schema field
     extra_metadata = Column(JSONB, nullable=True)
     
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     
+    # One variant has many mutations. cascade="all, delete-orphan" ensures
+    # mutations are deleted when the variant is deleted (no orphaned rows).
+    # lazy="select" means mutations are only fetched from DB when accessed.
     # Relationships
+    
     mutations = relationship("Mutation", back_populates="variant", cascade="all, delete-orphan", lazy="select")
     
     def to_dict(self, include_sequences=False, include_mutations=False):

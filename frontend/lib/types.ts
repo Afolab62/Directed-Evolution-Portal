@@ -14,6 +14,17 @@ export interface UniProtProtein {
   sequence: string;
   length: number;
   features: UniProtFeature[];
+  // Enriched fields returned by the detailed endpoint
+  gene_names?: string[];
+  keywords?: string[];
+  taxonomy_lineage?: string[];
+  pdb_ids?: string[];
+  alphafold_id?: string | null;
+  interpro_ids?: string[];
+  pfam_ids?: string[];
+  kegg_ids?: string[];
+  go_terms?: { id: string; term: string; aspect: string }[];
+  crossrefs?: Record<string, string[]>;
 }
 
 export interface UniProtFeature {

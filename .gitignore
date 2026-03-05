@@ -1,3 +1,19 @@
 node_modules
 .env
 .env.local
+
+# Python artefacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Flask session and runtime caches (must not be committed)
+flask_session/
+instance/
+*.egg-info/
+dist/
+build/
+
+# Next.js build output
+.next/

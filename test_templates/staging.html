@@ -1,7 +1,5 @@
-{% extends "base.html" %}
-{% block title %}Stage WT Experiment{% endblock %}
-
-{% block head_extra %}
+{% extends "base.html" %} # Page made to test mutation fingerprinting {% block
+title %}Stage WT Experiment{% endblock %} {% block head_extra %}
 <style>
   .stage-page {
     max-width: 960px;
@@ -124,16 +122,15 @@
     }
   }
 </style>
-{% endblock %}
-
-{% block content %}
+{% endblock %} {% block content %}
 <div class="stage-page">
   <div class="stage-grid">
     <section class="stage-card">
       <h1>Stage WT Experiment</h1>
       <p>
-        Load the wild-type protein from UniProt, validate that your plasmid FASTA
-        encodes it, and persist that staging record for the mutation fingerprint.
+        Load the wild-type protein from UniProt, validate that your plasmid
+        FASTA encodes it, and persist that staging record for the mutation
+        fingerprint.
       </p>
 
       <form method="post" enctype="multipart/form-data">
@@ -147,12 +144,19 @@
             placeholder="O34996"
             autocomplete="off"
             required
-          >
+          />
         </div>
 
         <div class="stage-field">
-          <label class="stage-label" for="plasmid_file">Upload FASTA file</label>
-          <input id="plasmid_file" name="plasmid_file" type="file" accept=".fa,.fasta,.txt">
+          <label class="stage-label" for="plasmid_file"
+            >Upload FASTA file</label
+          >
+          <input
+            id="plasmid_file"
+            name="plasmid_file"
+            type="file"
+            accept=".fa,.fasta,.txt"
+          />
         </div>
 
         <div class="stage-field">
@@ -162,7 +166,9 @@
             id="plasmid_fasta"
             name="plasmid_fasta"
             placeholder=">plasmid&#10;ATG..."
-          >{{ plasmid_fasta }}</textarea>
+          >
+{{ plasmid_fasta }}</textarea
+          >
         </div>
 
         <div class="stage-row">
@@ -172,16 +178,25 @@
               name="fetch_features"
               type="checkbox"
               value="1"
-              {% if fetch_features %}checked{% endif %}
-            >
+              {%
+              if
+              fetch_features
+              %}checked{%
+              endif
+              %}
+            />
             Fetch UniProt features
           </label>
         </div>
 
         <div class="stage-actions">
           <button type="submit">Validate and save</button>
-          <button type="button" class="stage-secondary" onclick="loadExample()">Load local example</button>
-          <a href="{{ url_for('fingerprint.index') }}">Open mutation fingerprint</a>
+          <button type="button" class="stage-secondary" onclick="loadExample()">
+            Load local example
+          </button>
+          <a href="{{ url_for('fingerprint.index') }}"
+            >Open mutation fingerprint</a
+          >
         </div>
       </form>
     </section>
@@ -193,10 +208,11 @@
       {% if result.error %}
       <p><span class="stage-pill err">Error</span></p>
       <div class="stage-code">{{ result.error }}</div>
-      {% else %}
-      {% set validation = result.validation or {} %}
+      {% else %} {% set validation = result.validation or {} %}
       <p>
-        <span class="stage-pill {% if validation.is_valid %}ok{% else %}err{% endif %}">
+        <span
+          class="stage-pill {% if validation.is_valid %}ok{% else %}err{% endif %}"
+        >
           {% if validation.is_valid %}Valid{% else %}Invalid{% endif %}
         </span>
       </p>
@@ -212,38 +228,41 @@
         <div>Protein length</div>
         <div>{{ validation.protein_len or "n/a" }} aa</div>
         <div>Start nucleotide</div>
-        <div>{{ validation.start_nt if validation.start_nt is not none else "n/a" }}</div>
+        <div>
+          {{ validation.start_nt if validation.start_nt is not none else "n/a"
+          }}
+        </div>
         <div>Strand / frame</div>
         <div>
-          {{ validation.strand or "n/a" }} /
-          {{ validation.frame if validation.frame is not none else "n/a" }}
+          {{ validation.strand or "n/a" }} / {{ validation.frame if
+          validation.frame is not none else "n/a" }}
         </div>
         <div>Wraps origin</div>
         <div>{{ "yes" if validation.wraps_origin else "no" }}</div>
         <div>Features loaded</div>
-        <div>{{ result.features|length if result.features is not none else 0 }}</div>
+        <div>
+          {{ result.features|length if result.features is not none else 0 }}
+        </div>
       </div>
       {% if validation.is_valid %}
-      <p style="margin-top:14px">
-        The active WT record is now stored in the app database and will be used by
+      <p style="margin-top: 14px">
+        The active WT record is now stored in the app database and will be used
+        by
         <a href="{{ url_for('fingerprint.index') }}">the fingerprint view</a>.
       </p>
-      {% endif %}
-      {% endif %}
+      {% endif %} {% endif %}
     </section>
     {% endif %}
   </div>
 </div>
-{% endblock %}
-
-{% block scripts_extra %}
+{% endblock %} {% block scripts_extra %}
 <script>
-async function loadExample() {
-  const response = await fetch('{{ url_for("staging.staging_example") }}');
-  const payload = await response.json();
-  if (payload.fasta) {
-    document.getElementById('plasmid_fasta').value = payload.fasta;
+  async function loadExample() {
+    const response = await fetch('{{ url_for("staging.staging_example") }}');
+    const payload = await response.json();
+    if (payload.fasta) {
+      document.getElementById("plasmid_fasta").value = payload.fasta;
+    }
   }
-}
 </script>
 {% endblock %}

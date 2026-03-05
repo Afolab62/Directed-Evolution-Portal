@@ -4,15 +4,9 @@ from flask import Blueprint, request, jsonify, session
 from database import db
 from models.experiment import VariantData
 from services.landscape_service import build_landscape_figure
+from routes.experiments._base import require_auth
 
 landscape_bp = Blueprint('landscape', __name__, url_prefix='/api/experiments')
-
-
-def require_auth():
-    user_id = session.get('user_id')
-    if not user_id:
-        return None
-    return user_id
 
 
 @landscape_bp.route('/<experiment_id>/landscape', methods=['GET'])

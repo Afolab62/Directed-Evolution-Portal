@@ -3,7 +3,7 @@
 A full-stack web application for monitoring, analysing, and visualising directed evolution experiments.  
 Built as an MSc Bioinformatics Group Project (2026).
 
-> For a detailed system design, database schema, and design decision log see [ARCHITECTURE.md](ARCHITECTURE.md).
+> For a help guide of the web portal see [HELP_GUIDE.md](HELP_GUIDE.md).
 
 ## Table of Contents
 

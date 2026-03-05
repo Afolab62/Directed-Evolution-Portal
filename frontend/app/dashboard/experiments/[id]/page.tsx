@@ -77,6 +77,7 @@ export default function ExperimentDetailPage() {
     errors: Array<{ row: number; field: string; message: string }>;
     warnings: string[];
   } | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   // Column-mapping confirmation state
   const [isPreviewingMapping, setIsPreviewingMapping] = useState(false);
@@ -206,6 +207,7 @@ export default function ExperimentDetailPage() {
 
     setIsPreviewingMapping(true);
     setUploadResult(null);
+    setUploadError(null);
     setShowMappingReview(false);
 
     try {
@@ -287,6 +289,7 @@ export default function ExperimentDetailPage() {
 
       if (result.success) {
         setUploadResult(result);
+        setUploadError(null);
         toast({
           title: "Success!",
           description: `Parsed ${result.processed} variants successfully. ${result.failedQC} rows failed QC.`,
@@ -294,13 +297,15 @@ export default function ExperimentDetailPage() {
         loadExperiment();
         loadVariants();
       } else {
-        toast({
-          title: result.error || "Failed to parse data",
-          variant: "destructive",
-        });
+        const msg = result.error || "Failed to parse data";
+        setUploadError(msg);
+        toast({ title: msg, variant: "destructive" });
       }
     } catch (error) {
       console.error("Upload error:", error);
+      const msg =
+        "Failed to upload file — check the browser console for details.";
+      setUploadError(msg);
       toast({ title: "Failed to upload file", variant: "destructive" });
     } finally {
       setIsUploading(false);
@@ -314,6 +319,7 @@ export default function ExperimentDetailPage() {
     setPendingContent("");
     setPendingFormat("tsv");
     setMappingEntries([]);
+    setUploadError(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -674,6 +680,30 @@ export default function ExperimentDetailPage() {
                 </div>
               )}
 
+              {/* ── Persistent upload error ──────────────────────────────── */}
+              {uploadError && !showMappingReview && (
+                <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4 flex items-start gap-3">
+                  <XCircle className="h-5 w-5 text-destructive mt-0.5 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-destructive text-sm mb-0.5">
+                      Upload failed
+                    </p>
+                    <p className="text-sm text-destructive/90 break-words">
+                      {uploadError}
+                    </p>
+                    <p className="text-xs text-destructive/70 mt-1">
+                      Fix your file or adjust the column mapping and try again.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setUploadError(null)}
+                    className="shrink-0 text-destructive/60 hover:text-destructive"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
+
               {/* ── Column mapping review ─────────────────────────────────── */}
               {showMappingReview && (
                 <div className="space-y-4">
@@ -744,13 +774,16 @@ export default function ExperimentDetailPage() {
                     <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 flex items-start gap-2">
                       <XCircle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
                       <p className="text-sm text-destructive">
-                        <span className="font-semibold">Upload blocked — missing required columns: </span>
+                        <span className="font-semibold">
+                          Upload blocked — missing required columns:{" "}
+                        </span>
                         <span className="font-medium">
                           {missingRequiredFields
                             .map((f) => FIELD_LABELS[f] ?? f)
                             .join(", ")}
                         </span>
-                        . Your file must contain these columns (or map them above) before you can upload.
+                        . Your file must contain these columns (or map them
+                        above) before you can upload.
                       </p>
                     </div>
                   )}

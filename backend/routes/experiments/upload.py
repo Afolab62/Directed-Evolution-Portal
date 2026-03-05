@@ -140,6 +140,16 @@ def upload_experimental_data(experiment_id: str):
             print(f"Parse error: {e}")
             return jsonify({'success': False, 'error': str(e)}), 400
 
+        if control_df.empty:
+            return jsonify({
+                'success': False,
+                'error': (
+                    'No control rows were found in the uploaded data. '
+                    'At least one row must be marked as a control '
+                    '(is_control = TRUE / 1) before activity scores can be calculated.'
+                )
+            }), 400
+
         # Step 2: Calculate activity scores
         print("Step 2: Calculating activity scores...")
         try:

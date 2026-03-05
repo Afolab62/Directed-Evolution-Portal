@@ -41,8 +41,19 @@ def create_app():
     app.register_blueprint(uniprot_bp)
     app.register_blueprint(landscape_bp)
     app.register_blueprint(staging_bp)
-    
-    
+
+    # ── Session teardown ───────────────────────────────────────────────────────
+    # SQLAlchemy uses a scoped_session keyed on the current thread.  Without
+    # explicit teardown the session (and its identity-map cache) persists
+    # across requests handled by the same worker thread.  This means a GET
+    # poll that reads experiment.analysis_status = "not_started" (from before
+    # the analysis was triggered) would return that cached value on every poll
+    # — even after the background thread has committed "completed" to the DB.
+    # db.remove() destroys the scoped session so each request starts fresh.
+    @app.teardown_appcontext
+    def shutdown_session(exception=None):
+        db.remove()
+
     # Health check endpoint
     @app.route('/health', methods=['GET'])
     def health():

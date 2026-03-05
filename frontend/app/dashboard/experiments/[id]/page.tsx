@@ -135,6 +135,13 @@ export default function ExperimentDetailPage() {
         const data = await res.json();
         if (!data.success) return;
 
+        // Guard against stale session caching on the backend: if the DB
+        // returns a non-terminal status that contradicts our known
+        // "analyzing" state (e.g. "not_started" from an un-cleared session
+        // cache), ignore it and keep polling — don't wipe the live banner.
+        const incoming = data.experiment.analysisStatus;
+        if (incoming === "not_started" || incoming === "pending") return;
+
         setExperiment(data.experiment);
 
         if (data.experiment.analysisStatus === "completed") {
@@ -456,8 +463,8 @@ export default function ExperimentDetailPage() {
       </div>
 
       {/* Global analysis status banners — always visible regardless of active tab */}
-      {experiment.analysisStatus === "analyzing" && (
-        elapsedSecs >= 900 ? (
+      {experiment.analysisStatus === "analyzing" &&
+        (elapsedSecs >= 900 ? (
           /* ── Slow-run warning: shown after 15 minutes ─────────────────── */
           <div className="flex items-start gap-3 p-3 rounded-lg bg-yellow-50 border border-yellow-300 text-yellow-800 dark:bg-yellow-950 dark:border-yellow-700 dark:text-yellow-300">
             <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-yellow-600 dark:text-yellow-400" />
@@ -466,7 +473,9 @@ export default function ExperimentDetailPage() {
               <span className="font-mono font-semibold">
                 {Math.floor(elapsedSecs / 60)}m {elapsedSecs % 60}s
               </span>
-              {" — large datasets can take 20+ minutes. Still checking every 5 s. If the server restarted, try Re-analyse."}
+              {
+                " — large datasets can take 20+ minutes. Still checking every 5 s. If the server restarted, try Re-analyse."
+              }
             </p>
           </div>
         ) : (
@@ -488,8 +497,7 @@ export default function ExperimentDetailPage() {
               auto-checking…
             </span>
           </div>
-        )
-      )}
+        ))}
       {analysisBanner && (
         <div className="flex items-start gap-3 p-4 rounded-lg bg-green-50 border border-green-200 text-green-800 dark:bg-green-950 dark:border-green-800 dark:text-green-300">
           <CheckCircle2 className="h-5 w-5 mt-0.5 shrink-0 text-green-600" />

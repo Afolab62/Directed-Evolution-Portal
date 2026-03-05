@@ -113,7 +113,9 @@ export function MutationFingerprint({
 }: MutationFingerprintProps) {
   const [activeTab, setActiveTab] = useState<"linear" | "3d">("linear");
   const [fp3dRequested, setFp3dRequested] = useState(false);
-  const [highlightedPosition, setHighlightedPosition] = useState<number | null>(null);
+  const [highlightedPosition, setHighlightedPosition] = useState<number | null>(
+    null,
+  );
 
   // Reset when variant changes
   useEffect(() => {

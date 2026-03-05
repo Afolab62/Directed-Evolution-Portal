@@ -89,7 +89,12 @@ class Experiment(Base):
 
 
 class VariantData(Base):
-    """Model for storing experimental variant data"""
+    """
+    Stores a single variant (or control) row from an uploaded TSV/JSON data file.
+    Each variant belongs to one experiment and one generation of directed evolution.
+    Controls (is_control=True) are Gen 0 wild-type references used to normalise
+    activity scores across the rest of the variants.
+    """
     __tablename__ = 'variant_data'
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -112,12 +117,16 @@ class VariantData(Base):
     qc_status = Column(String(20), nullable=False, default='pending')  # passed, failed
     qc_message = Column(Text, nullable=True)
     
-    # Additional metadata stored as JSON
+    # Any extra columns from the TSV that don't map to a fixed schema field
     extra_metadata = Column(JSONB, nullable=True)
     
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     
+    # One variant has many mutations. cascade="all, delete-orphan" ensures
+    # mutations are deleted when the variant is deleted (no orphaned rows).
+    # lazy="select" means mutations are only fetched from DB when accessed.
     # Relationships
+    
     mutations = relationship("Mutation", back_populates="variant", cascade="all, delete-orphan", lazy="select")
     
     def to_dict(self, include_sequences=False, include_mutations=False):

@@ -143,8 +143,7 @@ export default function ExperimentDetailPage() {
           setIsAnalyzing(false);
           toast({
             title: "Analysis Failed",
-            description:
-              data.experiment.analysisMessage || "An error occurred",
+            description: data.experiment.analysisMessage || "An error occurred",
             variant: "destructive",
           });
         } else {
@@ -231,14 +230,19 @@ export default function ExperimentDetailPage() {
         const entries: MappingEntry[] = (result.raw_columns as string[]).map(
           (raw) => ({
             rawCol: raw,
-            canonicalField: (result.column_mapping as Record<string, string>)[raw] ?? "",
+            canonicalField:
+              (result.column_mapping as Record<string, string>)[raw] ??
+              "__metadata__",
           }),
         );
         setMappingEntries(entries);
         setCanonicalFields((result.canonical_fields as string[]) ?? []);
         setShowMappingReview(true);
       } else {
-        toast({ title: result.error || "Failed to read file", variant: "destructive" });
+        toast({
+          title: result.error || "Failed to read file",
+          variant: "destructive",
+        });
       }
     } catch (error) {
       console.error("Preview mapping error:", error);
@@ -257,7 +261,9 @@ export default function ExperimentDetailPage() {
 
     const columnMapping = Object.fromEntries(
       mappingEntries
-        .filter((e) => e.canonicalField !== "")
+        .filter(
+          (e) => e.canonicalField !== "" && e.canonicalField !== "__metadata__",
+        )
         .map((e) => [e.rawCol, e.canonicalField]),
     );
 
@@ -287,7 +293,10 @@ export default function ExperimentDetailPage() {
         loadExperiment();
         loadVariants();
       } else {
-        toast({ title: result.error || "Failed to parse data", variant: "destructive" });
+        toast({
+          title: result.error || "Failed to parse data",
+          variant: "destructive",
+        });
       }
     } catch (error) {
       console.error("Upload error:", error);
@@ -650,9 +659,9 @@ export default function ExperimentDetailPage() {
               {showMappingReview && (
                 <div className="space-y-4">
                   <p className="text-sm text-muted-foreground">
-                    The system auto-detected the mapping below. Each row
-                    flashes green to confirm detection. Adjust any dropdown
-                    before confirming.
+                    The system auto-detected the mapping below. Each row flashes
+                    green to confirm detection. Adjust any dropdown before
+                    confirming.
                   </p>
 
                   <div className="rounded-lg border border-border overflow-hidden">
@@ -683,7 +692,9 @@ export default function ExperimentDetailPage() {
                                 onValueChange={(val) =>
                                   setMappingEntries((prev) =>
                                     prev.map((e, i) =>
-                                      i === idx ? { ...e, canonicalField: val } : e,
+                                      i === idx
+                                        ? { ...e, canonicalField: val }
+                                        : e,
                                     ),
                                   )
                                 }
@@ -692,7 +703,7 @@ export default function ExperimentDetailPage() {
                                   <SelectValue placeholder="— extra metadata —" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  <SelectItem value="">
+                                  <SelectItem value="__metadata__">
                                     — extra metadata —
                                   </SelectItem>
                                   {canonicalFields.map((field) => (
@@ -720,7 +731,9 @@ export default function ExperimentDetailPage() {
                       "is_control",
                     ];
                     const assigned = new Set(
-                      mappingEntries.map((e) => e.canonicalField),
+                      mappingEntries
+                        .filter((e) => e.canonicalField !== "__metadata__")
+                        .map((e) => e.canonicalField),
                     );
                     const missing = required.filter((f) => !assigned.has(f));
                     return missing.length > 0 ? (
@@ -729,7 +742,9 @@ export default function ExperimentDetailPage() {
                         <p className="text-sm text-yellow-700 dark:text-yellow-400">
                           Missing required fields:{" "}
                           <span className="font-medium">
-                            {missing.map((f) => FIELD_LABELS[f] ?? f).join(", ")}
+                            {missing
+                              .map((f) => FIELD_LABELS[f] ?? f)
+                              .join(", ")}
                           </span>
                           . Assign them above or the upload will be blocked.
                         </p>

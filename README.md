@@ -28,9 +28,10 @@ Built as an MSc Bioinformatics Group Project (2026).
 - **Analysis dashboard** with four visualisation tabs:
   - _Overview_ — matplotlib violin plot of activity score distribution per generation (server-rendered) + summary stats table
   - _Top Performers_ — ranked table of the 10 highest-activity variants with their mutation lists
-  - _Mutation Fingerprint_ — Plotly 3-D residue heatmap showing mutation frequency across the protein structure (PDB or linear fallback)
-  - _Activity Landscape_ — UMAP/PCA embedding of variant sequences coloured by activity score
-- **Mutation export** — download all detected mutations for an experiment as a TSV file
+  - _Mutation Fingerprint_ — Plotly 3-D residue heatmap showing mutation frequency across the protein structure (AlphaFold PDB or linear fallback)
+  - _Activity Landscape_ — UMAP/PCA/t-SNE embedding of variant sequences coloured by activity score
+- **Mutation export** — download all detected mutations for an experiment as a CSV file
+- **Sequence analysis button** — triggers background job; button changes to _Analysing…_ → _Analysis Complete!_ → _Re-analyse_; elapsed timer and auto-polling banner update every 5 s without page refresh
 - **UniProt integration** — automatic fetch and caching of protein features (domains, active sites, etc.) and raw FASTA sequence
 - **Authentication** — bcrypt-hashed user accounts with server-side Flask-Session cookies
 
@@ -197,7 +198,7 @@ Directed-Evolution-Portal/
 │   ├── lib/types.ts                    Shared TypeScript types
 │   └── package.json
 │
-├── ARCHITECTURE.md             System design, schema, design decisions
+├── HELP_GUIDE.md
 ├── package.json                Root dev runner (concurrently)
 └── README.md
 ```
@@ -222,7 +223,7 @@ Directed-Evolution-Portal/
 | POST   | `/api/experiments/<id>/preview-mapping`                 | Preview auto-detected column mapping before upload    |
 | POST   | `/api/experiments/<id>/upload-data`                     | Upload TSV/JSON of variant data (duplicate-row guard) |
 | POST   | `/api/experiments/<id>/analyze-sequences`               | Run mutation analysis (NW alignment)                  |
-| GET    | `/api/experiments/<id>/mutations/export`                | Download mutations as TSV                             |
+| GET    | `/api/experiments/<id>/mutations/export`                | Download mutations as CSV                             |
 | GET    | `/api/experiments/<id>/plots/activity-distribution`     | PNG violin plot (matplotlib)                          |
 | GET    | `/api/experiments/<id>/fingerprint/<variant_id>`        | Mutation fingerprint data                             |
 | GET    | `/api/experiments/<id>/fingerprint3d/<variant_id>`      | 3-D residue heatmap (PDB-mapped)                      |

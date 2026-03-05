@@ -109,11 +109,17 @@ Rows that fail QC are reported in the upload response (`failedQC` count and a ta
 
 ## 5. Running Sequence Analysis
 
-After uploading data, click **Analyse Sequences** on the experiment detail page (Upload Data tab).
+After uploading data, the **Sequence Analysis** card appears at the bottom of the **Upload Data** tab on the experiment detail page.
 
-This starts a **background analysis job**. The page will show a live status banner indicating the job is in progress, with an elapsed-seconds counter. The status updates every 5 seconds by polling the server — you do not need to keep the page open.
+Click **Analyse Sequences** to start the job. The button immediately changes to **Analysing…** (spinner) and a blue progress banner appears at the top of the page showing elapsed time. The banner auto-updates every 5 seconds by polling the server — **you must keep the browser tab open** for the polling to continue.
 
-When analysis completes, a green **Analysis Complete** banner appears at the top of the page (visible on any tab) and variant mutation data becomes available in the visualisations.
+When the job finishes:
+
+- The blue banner is replaced by a green **Analysis Complete!** banner showing the time taken (e.g. _“Successfully analysed 247 variants in 2m 34s”_).
+- The button changes to **Analysis Complete!** for 10 seconds, then permanently to **Re-analyse** (green), which you can click to re-run at any time.
+- The Variants tab on the experiment detail page and all visualisations on the Analysis page are automatically refreshed.
+
+If the job is still running after 15 minutes (unlikely), the banner turns yellow with a warning that large datasets can take 20+ minutes. Polling continues regardless.
 
 ### What the analysis does
 
@@ -237,21 +243,21 @@ The embedding is computed from binary mutation vectors (each dimension = presenc
 
 ## 9. Data Export
 
-Currently, the portal does not provide a one-click bulk export. The following workarounds are available:
-
-- **Raw variant data**: The Variants tab on the experiment detail page shows the first 50 variants sorted by activity score. For larger exports, query the Neon database directly.
-- **Plots**: Right-click any Plotly chart → _Download plot as PNG_. The violin plot image can be right-clicked and saved directly.
-- **FASTA**: On the New Experiment page, after looking up a protein, a **Download FASTA** link downloads the WT protein sequence as a `.fasta` file.
+- **Mutation CSV** — on the experiment detail Variants tab, click **Export Mutations CSV** to download a CSV of every detected mutation with columns: `variant_index`, `generation`, `position`, `wt_aa`, `mut_aa`, `wt_codon`, `mut_codon`, `mutation_type`, `aa_change`, `generation_introduced`.
+- **Variant list** — the Variants tab shows up to 1‬000 variants sorted by activity score. For larger exports, query the Neon database directly.
+- **Plots** — right-click any Plotly chart → _Download plot as PNG_. The violin plot image can be right-clicked and saved directly.
+- **FASTA** — on the New Experiment page, after looking up a protein, a **Download FASTA** link downloads the WT protein sequence as a `.fasta` file.
 
 ---
 
 ## 10. Troubleshooting
 
-### "Analysis in progress" does not resolve
+### “Analysis in progress” banner does not resolve
 
 - Check that the Flask backend is running (`python run.py` from the `backend/` directory).
-- Background analysis runs in a daemon thread. If the server was restarted mid-analysis, the `analysis_status` column may be stuck at `analyzing`. Click **Re-analyse** to restart.
-- For large datasets (> 500 variants) analysis can take 2–5 minutes. The elapsed-seconds counter on the status banner confirms the job is still running.
+- The analysis runs in a background daemon thread. **You must keep the browser tab open** — the 5-second polling loop is client-side and stops if the page is closed or refreshed.
+- If the server was restarted mid-analysis, the `analysis_status` column may be stuck at `analyzing`. Click **Re-analyse** to restart the job from scratch.
+- For large datasets (> 500 variants) analysis can take several minutes. After 15 minutes the banner turns yellow but polling continues. The elapsed timer on the banner confirms the job is still active.
 
 ### Upload rejected — "Could not find required columns"
 
@@ -319,15 +325,16 @@ Plasmid_Variant_Index	Generation	Assembled_DNA_Sequence	DNA_Yield	Protein_Yield	
 
 ## 12. Glossary
 
-| Term                        | Definition                                                                                                                                                  |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Activity score**          | Normalised fold-change metric measuring catalytic efficiency relative to generation-matched controls (see §6)                                               |
-| **Control**                 | A variant with `Is_Control = TRUE`; represents the unmodified WT construct in a given generation and is used as baseline for activity score normalisation   |
-| **Generation**              | One round of directed-evolution mutagenesis and selection; 0 = starting WT                                                                                  |
-| **ORF**                     | Open reading frame — the contiguous stretch of codons between a start and stop codon that encodes the protein                                               |
-| **Non-synonymous mutation** | A codon change that alters the amino-acid sequence of the protein                                                                                           |
-| **Synonymous mutation**     | A codon change that does not alter the amino-acid sequence (silent mutation)                                                                                |
-| **Rotation offset**         | The circular shift in nucleotide position between how the WT plasmid and a variant plasmid were assembled; corrected automatically during sequence analysis |
-| **Needleman-Wunsch**        | A global sequence alignment algorithm used to assign alignment-aware positions to mutations when indels are present                                         |
-| **PCA / t-SNE / UMAP**      | Dimensionality reduction methods used to embed high-dimensional mutation vectors into 2-D for the activity landscape plot                                   |
-| **UniProt accession**       | A unique identifier for a protein in the UniProt database (e.g. `O34996`)                                                                                   |
+| Term                        | Definition                                                                                                                                                               |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Activity score**          | Normalised fold-change metric measuring catalytic efficiency relative to generation-matched controls (see §6)                                                            |
+| **Control**                 | A variant with `Is_Control = TRUE`; represents the unmodified WT construct in a given generation and is used as baseline for activity score normalisation                |
+| **Mutation export**         | A CSV file of all detected mutations, downloadable from the Variants tab of an experiment; includes position, amino-acid change, codon change, and generation introduced |
+| **Generation**              | One round of directed-evolution mutagenesis and selection; 0 = starting WT                                                                                               |
+| **ORF**                     | Open reading frame — the contiguous stretch of codons between a start and stop codon that encodes the protein                                                            |
+| **Non-synonymous mutation** | A codon change that alters the amino-acid sequence of the protein                                                                                                        |
+| **Synonymous mutation**     | A codon change that does not alter the amino-acid sequence (silent mutation)                                                                                             |
+| **Rotation offset**         | The circular shift in nucleotide position between how the WT plasmid and a variant plasmid were assembled; corrected automatically during sequence analysis              |
+| **Needleman-Wunsch**        | A global sequence alignment algorithm used to assign alignment-aware positions to mutations when indels are present                                                      |
+| **PCA / t-SNE / UMAP**      | Dimensionality reduction methods used to embed high-dimensional mutation vectors into 2-D for the activity landscape plot                                                |
+| **UniProt accession**       | A unique identifier for a protein in the UniProt database (e.g. `O34996`)                                                                                                |
